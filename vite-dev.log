@@ -1,0 +1,23 @@
+
+> make-sense@1.11.0-alpha dev
+> vite --host --port 3000
+
+
+  [32m[1mVITE[22m v3.0.2[39m  [2mready in [37m[1m229[22m[2m[39m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3000[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.1.111:[1m3000[22m/[39m
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[2m20:05:50[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/logic/context/EditorContext.ts[22m
+[2m20:08:38[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/logic/context/ContextManager.ts[22m
+[2m20:11:26[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/logic/context/ContextManager.ts[22m
+[2m20:14:41[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/logic/actions/ImageActions.ts[22m
+[2m20:23:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/EditorContainer/EditorContainer.tsx[22m
+[2m20:23:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/SideNavigationBar/ImagesList/ImagesList.scss[22m
+[2m20:24:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/EditorContainer/EditorContainer.tsx[22m
+[2m20:24:15[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/SideNavigationBar/ImagesList/ImagesList.scss[22m
+[2m21:03:56[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/logic/actions/AIActions.ts[22m
+[2m21:04:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/EditorContainer/EditorContainer.tsx[22m
+[2m21:04:16[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/EditorView/SideNavigationBar/ImagesList/ImagesList.scss[22m
