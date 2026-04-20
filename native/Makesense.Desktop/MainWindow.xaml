@@ -1,0 +1,445 @@
+<Window x:Class="Makesense.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:controls="clr-namespace:Makesense.Desktop.Controls"
+        xmlns:converters="clr-namespace:Makesense.Desktop.Converters"
+        mc:Ignorable="d"
+        Title="Makesense Native"
+        Width="1680"
+        Height="960"
+        MinWidth="1280"
+        MinHeight="760"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource AppBackgroundBrush}">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Resources/DialogTemplates.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+            <Style x:Key="PanelCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="22" />
+                <Setter Property="Margin" Value="10" />
+            </Style>
+            <Style x:Key="SectionSurfaceStyle" TargetType="Border">
+                <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="18" />
+                <Setter Property="Padding" Value="14" />
+            </Style>
+            <Style x:Key="MetricCardStyle" TargetType="Border">
+                <Setter Property="Background" Value="#132034" />
+                <Setter Property="BorderBrush" Value="#2A405E" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="16" />
+                <Setter Property="Padding" Value="14,12" />
+                <Setter Property="Margin" Value="0,0,10,0" />
+            </Style>
+            <Style x:Key="HeaderTextStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="17" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Margin" Value="0,0,0,6" />
+            </Style>
+            <Style x:Key="CaptionTextStyle" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                <Setter Property="FontSize" Value="12" />
+            </Style>
+            <Style x:Key="CompactButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Padding" Value="10,6" />
+                <Setter Property="Margin" Value="0,0,8,8" />
+                <Setter Property="MinHeight" Value="32" />
+            </Style>
+            <Style x:Key="ToolbarButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Padding" Value="14,8" />
+                <Setter Property="Margin" Value="0,0,10,0" />
+                <Setter Property="Background" Value="#1D2C43" />
+                <Setter Property="BorderBrush" Value="#304A6D" />
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="5" />
+            <RowDefinition Height="88" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="42" />
+        </Grid.RowDefinitions>
+
+        <ProgressBar Grid.Row="0" Maximum="100" Value="{Binding ProjectProgressPercent, Mode=OneWay}" />
+
+        <Border Grid.Row="1" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,14">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,0">
+                    <Border Width="18" Height="18" Background="{StaticResource AccentBrush}" CornerRadius="5" Margin="0,0,10,0" />
+                    <StackPanel>
+                        <TextBlock FontWeight="Bold" FontSize="19" Text="Make Sense" />
+                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Studio de revue, annotation et inférence native" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#122033" BorderBrush="#2D4567" BorderThickness="1" CornerRadius="14" Padding="12,10" Margin="0,0,12,0">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Nom du projet" />
+                            <TextBox Width="240" Margin="0,6,0,0" Text="{Binding ProjectName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="#122033" BorderBrush="#2D4567" BorderThickness="1" CornerRadius="14" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Runtime" />
+                            <TextBlock Margin="0,6,0,0" Text="{Binding RuntimeSummary}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <WrapPanel VerticalAlignment="Center" Margin="24,0,0,0">
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open" Command="{Binding OpenImagesCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Add" Command="{Binding AddImagesCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Project" Command="{Binding OpenProjectCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Import" Command="{Binding ImportAnnotationsCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Export" Command="{Binding ExportAnnotationsCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Manifest" Command="{Binding ExportManifestCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Limits" Command="{Binding ApplyPerformanceLimitsCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Inference" Command="{Binding RunInferenceCommand}" />
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="342" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="388" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}">
+                <Grid Margin="18">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="130" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="165" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                        <StackPanel DockPanel.Dock="Left">
+                            <TextBlock Style="{StaticResource HeaderTextStyle}" Text="Dataset browser" />
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Cherche, filtre et révise le lot d’images." />
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Style="{StaticResource CompactButtonStyle}" Content="Prev" Command="{Binding PreviousImageCommand}" />
+                            <Button Style="{StaticResource CompactButtonStyle}" Content="Next" Command="{Binding NextImageCommand}" />
+                        </StackPanel>
+                    </DockPanel>
+                    <Border Grid.Row="1" Style="{StaticResource SectionSurfaceStyle}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Recherche et statut" />
+                            <TextBox Margin="0,8,0,8" Text="{Binding ImageSearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <ComboBox Margin="0,0,0,10" ItemsSource="{Binding AvailableImageFilters}" SelectedItem="{Binding SelectedImageFilter, Mode=TwoWay}" />
+                            <WrapPanel Margin="0,0,0,10">
+                                <Border Style="{StaticResource MetricCardStyle}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Suggestions" />
+                                        <TextBlock FontSize="20" FontWeight="Bold" Text="{Binding SuggestionImageCount}" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Style="{StaticResource MetricCardStyle}" Margin="0">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="À revoir" />
+                                        <TextBlock FontSize="20" FontWeight="Bold" Text="{Binding PendingReviewImageCount}" />
+                                    </StackPanel>
+                                </Border>
+                            </WrapPanel>
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Couverture du tool courant" />
+                            <ProgressBar Maximum="100" Value="{Binding ProjectProgressPercent, Mode=OneWay}" Margin="0,8,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Style="{StaticResource CompactButtonStyle}" Content="Next pending" Command="{Binding NextPendingReviewImageCommand}" />
+                                <Button Style="{StaticResource CompactButtonStyle}" Content="Next suggested" Command="{Binding NextSuggestionImageCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="2" Style="{StaticResource SectionSurfaceStyle}" Padding="0">
+                        <ListBox ItemsSource="{Binding FilteredImagesView}" SelectedItem="{Binding SelectedImage, Mode=TwoWay}" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="10" Margin="0,0,0,4">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="56" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="48" Height="48" Background="#142238" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12">
+                                                <Image Stretch="UniformToFill" Source="{Binding Path}" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                                                <TextBlock FontWeight="SemiBold" Text="{Binding FileName}" />
+                                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding Annotations.Count, StringFormat=Annotations: {0}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                    <TextBlock Grid.Row="3" Style="{StaticResource HeaderTextStyle}" Margin="0,12,0,8" Text="Labels" />
+                    <Border Grid.Row="4" Style="{StaticResource SectionSurfaceStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                                <Button DockPanel.Dock="Right" Style="{StaticResource CompactButtonStyle}" Content="Manage" Command="{Binding OpenLabelManagerCommand}" />
+                                <Button DockPanel.Dock="Right" Style="{StaticResource CompactButtonStyle}" Content="Add" Command="{Binding AddLabelCommand}" />
+                                <TextBox Margin="0" Text="{Binding NewLabelName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </DockPanel>
+                            <Button Grid.Row="1" Style="{StaticResource CompactButtonStyle}" HorizontalAlignment="Left" Margin="0,0,0,8" Content="Remove selected" Command="{Binding RemoveLabelCommand}" />
+                            <ListBox Grid.Row="2" ItemsSource="{Binding Labels}" SelectedItem="{Binding SelectedLabel, Mode=TwoWay}" BorderThickness="0" Background="Transparent" DisplayMemberPath="Name" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Grid.Row="5" Style="{StaticResource HeaderTextStyle}" Margin="0,12,0,8" Text="Annotations" />
+                    <Border Grid.Row="6" Style="{StaticResource SectionSurfaceStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Style="{StaticResource CompactButtonStyle}" Content="Add from tool" Command="{Binding AddAnnotationCommand}" />
+                                <Button Style="{StaticResource CompactButtonStyle}" Content="Delete selected" Command="{Binding DeleteAnnotationCommand}" />
+                            </StackPanel>
+                            <ListBox Grid.Row="1" ItemsSource="{Binding Annotations}" SelectedItem="{Binding SelectedAnnotation, Mode=TwoWay}" BorderThickness="0" Background="Transparent" DisplayMemberPath="Summary" />
+                        </Grid>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}" Margin="10,10,10,6">
+                    <Grid Margin="18,14">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Style="{StaticResource MetricCardStyle}">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Tool" />
+                                <ComboBox Width="140" Margin="0,8,0,0" ItemsSource="{Binding AvailableTools}" SelectedItem="{Binding SelectedTool, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Grid.Column="1" Style="{StaticResource MetricCardStyle}" Margin="0">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Inference task" />
+                                <ComboBox Width="160" Margin="0,8,0,0" ItemsSource="{Binding InferenceTasks}" SelectedItem="{Binding SelectedInferenceTask, Mode=TwoWay}" />
+                            </StackPanel>
+                        </Border>
+                        <StackPanel Grid.Column="2" Margin="16,0">
+                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Modèle actif" />
+                            <TextBox Margin="0,8,0,0" Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Style="{StaticResource CompactButtonStyle}" Content="Accept image" Command="{Binding AcceptAllSuggestionsCommand}" />
+                            <Button Style="{StaticResource CompactButtonStyle}" Content="Reject image" Command="{Binding RejectAllSuggestionsCommand}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Margin="10,6,10,10">
+                    <Grid>
+                        <controls:NativeRenderHost x:Name="RenderHost" />
+                        <controls:EditorOverlayControl x:Name="EditorOverlay"
+                                                       Image="{Binding SelectedImage}"
+                                                       Annotations="{Binding CurrentAnnotations}"
+                                                       SelectedAnnotationId="{Binding SelectedAnnotationId}"
+                                                       Tool="{Binding SelectedTool}"
+                                                       Zoom="{Binding ViewZoom}"
+                                                       PanOffsetX="{Binding PanOffsetX}"
+                                                       PanOffsetY="{Binding PanOffsetY}"
+                                                       Panel.ZIndex="2" />
+                        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="18" Padding="14,12" Background="#D2142235" BorderBrush="#3A587E" BorderThickness="1" CornerRadius="16">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" FontSize="16" Text="Editor viewport" />
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding RenderHostHint}" />
+                            </StackPanel>
+                        </Border>
+                        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="18" Padding="14,12" Background="#D2142235" BorderBrush="#2A405E" BorderThickness="1" CornerRadius="16">
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Image active" />
+                                <TextBlock FontWeight="SemiBold" Text="{Binding SelectedImageSummary}" />
+                            </StackPanel>
+                        </Border>
+                        <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="26" Background="#F2131E2F" BorderBrush="#37557A" BorderThickness="1" CornerRadius="22" Visibility="{Binding HasFilteredImages, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                            <StackPanel HorizontalAlignment="Center">
+                                <TextBlock HorizontalAlignment="Center" FontSize="22" FontWeight="SemiBold" Text="{Binding EmptyStateMessage}" />
+                                <TextBlock HorizontalAlignment="Center" Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding EmptyStateHint}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Border Grid.Column="2" Style="{StaticResource PanelCardStyle}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="18">
+                        <TextBlock Style="{StaticResource HeaderTextStyle}" Text="Review and model" />
+                        <Border Style="{StaticResource SectionSurfaceStyle}">
+                            <StackPanel>
+                                <WrapPanel Margin="0,0,0,10">
+                                    <Border Style="{StaticResource MetricCardStyle}">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Suggestions" />
+                                            <TextBlock FontSize="22" FontWeight="Bold" Text="{Binding SuggestedAnnotationCount}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource MetricCardStyle}" Margin="0">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Progression" />
+                                            <TextBlock FontSize="22" FontWeight="Bold" Text="{Binding ProjectProgressPercent, StringFormat={}{0:0}%}" />
+                                        </StackPanel>
+                                    </Border>
+                                </WrapPanel>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Active model" />
+                                <TextBox Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                                <WrapPanel Margin="0,8,0,0">
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Accept image" Command="{Binding AcceptAllSuggestionsCommand}" />
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Reject image" Command="{Binding RejectAllSuggestionsCommand}" />
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Accept dataset" Command="{Binding AcceptAllDatasetSuggestionsCommand}" />
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Reject dataset" Command="{Binding RejectAllDatasetSuggestionsCommand}" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Style="{StaticResource HeaderTextStyle}" Margin="0,14,0,8" Text="Selected annotation" />
+                        <Border Style="{StaticResource SectionSurfaceStyle}">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="{Binding SelectedAnnotation.Record.Kind}" />
+                                <TextBlock Margin="0,2,0,10" Style="{StaticResource CaptionTextStyle}" Text="{Binding SelectedAnnotation.Summary}" />
+                                <CheckBox Content="Visible" IsChecked="{Binding SelectedAnnotationIsVisible, Mode=TwoWay}" />
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Assigned label" />
+                                <ComboBox ItemsSource="{Binding AnnotationLabelOptions}" SelectedItem="{Binding SelectedAnnotationLabel, Mode=TwoWay}" DisplayMemberPath="Name" />
+                                <Button Style="{StaticResource CompactButtonStyle}" HorizontalAlignment="Left" Margin="0,0,0,8" Content="Clear label" Command="{Binding ClearSelectedAnnotationLabelCommand}" />
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Suggested label" />
+                                <TextBox Text="{Binding SelectedAnnotationSuggestedLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <WrapPanel Margin="0,0,0,8">
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Accept suggestion" Command="{Binding AcceptSuggestedLabelCommand}" />
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Reject suggestion" Command="{Binding RejectSuggestedLabelCommand}" />
+                                </WrapPanel>
+                                <StackPanel Visibility="{Binding IsRectAnnotationSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Rectangle" />
+                                    <UniformGrid Columns="2">
+                                        <TextBox Margin="0,4,4,0" Text="{Binding RectX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="4,4,0,0" Text="{Binding RectY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="0,4,4,0" Text="{Binding RectWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="4,4,0,0" Text="{Binding RectHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </UniformGrid>
+                                </StackPanel>
+                                <StackPanel Visibility="{Binding IsPointAnnotationSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Point" />
+                                    <UniformGrid Columns="2">
+                                        <TextBox Margin="0,4,4,0" Text="{Binding PointX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="4,4,0,0" Text="{Binding PointY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </UniformGrid>
+                                </StackPanel>
+                                <StackPanel Visibility="{Binding IsLineAnnotationSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Line" />
+                                    <UniformGrid Columns="2">
+                                        <TextBox Margin="0,4,4,0" Text="{Binding LineStartX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="4,4,0,0" Text="{Binding LineStartY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="0,4,4,0" Text="{Binding LineEndX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBox Margin="4,4,0,0" Text="{Binding LineEndY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </UniformGrid>
+                                </StackPanel>
+                                <StackPanel Visibility="{Binding IsPolygonAnnotationSelected, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Polygon points (x,y per line)" />
+                                    <TextBox MinHeight="110" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding PolygonPointsText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="Polygon editing: Ctrl+click inserts a vertex. Alt+click removes one." />
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Apply changes" Command="{Binding ApplySelectedAnnotationPropertiesCommand}" />
+                                    <Button Style="{StaticResource CompactButtonStyle}" Content="Toggle visibility" Command="{Binding ToggleSelectedAnnotationVisibilityCommand}" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Style="{StaticResource HeaderTextStyle}" Margin="0,14,0,8" Text="Performance" />
+                        <Border Style="{StaticResource SectionSurfaceStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max RAM (MB)" />
+                                    <TextBox Text="{Binding Performance.MaxRamMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Decode threads" />
+                                    <TextBox Text="{Binding Performance.MaxDecodeThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Inference jobs" />
+                                    <TextBox Text="{Binding Performance.MaxInferenceJobs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max VRAM (MB)" />
+                                    <TextBox Text="{Binding Performance.MaxVramMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="I/O threads" />
+                                    <TextBox Text="{Binding Performance.MaxIoThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Prefetch images" />
+                                    <TextBox Text="{Binding Performance.MaxPrefetchImages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <TextBlock Style="{StaticResource HeaderTextStyle}" Margin="0,14,0,8" Text="Notifications" />
+                        <Border Style="{StaticResource SectionSurfaceStyle}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource CaptionTextStyle}" Text="Recent activity" />
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource CompactButtonStyle}" Margin="0" Content="Clear" Command="{Binding ClearNotificationsCommand}" />
+                                </DockPanel>
+                                <ItemsControl ItemsSource="{Binding Notifications}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,6" Padding="10" Background="#142238" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12">
+                                                <TextBlock TextWrapping="Wrap" Style="{StaticResource CaptionTextStyle}" Text="{Binding Message}" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="3" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="{Binding ProjectPath}" />
+                <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="{Binding SelectedImageSummary}" />
+                <TextBlock VerticalAlignment="Center" HorizontalAlignment="Center" FontWeight="SemiBold" Style="{StaticResource CaptionTextStyle}" Text="{Binding StatusMessage}" />
+            </DockPanel>
+        </Border>
+
+        <Border Grid.RowSpan="4" Background="#94040A14" Visibility="{Binding IsDialogOpen, Converter={StaticResource BooleanToVisibilityConverter}}" Panel.ZIndex="40">
+            <Grid>
+                <Border Width="640" MaxWidth="700" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24" Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="24">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock FontSize="22" FontWeight="SemiBold" Text="{Binding ActiveDialog.Title}" />
+                            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource AccentBrush}" Text="{Binding ActiveDialog.Description}" />
+                        </StackPanel>
+                        <ContentControl Margin="0,18,0,0" Content="{Binding ActiveDialog}" />
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

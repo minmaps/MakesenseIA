@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/native/">
+    <Project Path="native/Makesense.Desktop.Tests/Makesense.Desktop.Tests.csproj" />
+    <Project Path="native/Makesense.Desktop/Makesense.Desktop.csproj" />
+    <Project Path="native/Makesense.Formats/Makesense.Formats.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,73 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:dialogs="clr-namespace:Makesense.Desktop.ViewModels.Dialogs">
+    <DataTemplate DataType="{x:Type dialogs:InferenceSetupDialogViewModel}">
+        <StackPanel>
+            <TextBlock FontWeight="SemiBold" Text="Inference Task" />
+            <ComboBox Margin="0,6,0,0" ItemsSource="{Binding AvailableInferenceTasks}" SelectedItem="{Binding SelectedInferenceTask, Mode=TwoWay}" />
+            <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="Model Path" />
+            <DockPanel Margin="0,6,0,0">
+                <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse" Command="{Binding BrowseModelCommand}" />
+                <TextBox Text="{Binding ModelPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </DockPanel>
+            <TextBlock Margin="0,8,0,0" Foreground="{StaticResource AccentBrush}" Text="Only ONNX models are accepted in the native desktop workflow." />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+                <Button Content="Run Inference" Command="{Binding ConfirmCommand}" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type dialogs:ImportAnnotationsDialogViewModel}">
+        <StackPanel>
+            <TextBlock FontWeight="SemiBold" Text="Format" />
+            <ComboBox Margin="0,6,0,0" ItemsSource="{Binding AvailableFormats}" SelectedItem="{Binding SelectedFormat, Mode=TwoWay}" />
+            <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="Source Files" />
+            <TextBlock Margin="0,6,0,0" Foreground="{StaticResource AccentBrush}" Text="{Binding SelectedPathsSummary}" />
+            <Button Margin="0,10,0,0" HorizontalAlignment="Left" Content="Choose Source Files" Command="{Binding BrowseSourcesCommand}" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+                <Button Content="Import" Command="{Binding ConfirmCommand}" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type dialogs:ExportAnnotationsDialogViewModel}">
+        <StackPanel>
+            <TextBlock FontWeight="SemiBold" Text="Format" />
+            <ComboBox Margin="0,6,0,0" ItemsSource="{Binding AvailableFormats}" SelectedItem="{Binding SelectedFormat, Mode=TwoWay}" />
+            <TextBlock Margin="0,14,0,0" FontWeight="SemiBold" Text="Destination" />
+            <DockPanel Margin="0,6,0,0">
+                <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Browse" Command="{Binding BrowseDestinationCommand}" />
+                <TextBox Text="{Binding DestinationPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </DockPanel>
+            <TextBlock Margin="0,8,0,0" Foreground="{StaticResource AccentBrush}" Text="{Binding DefaultExtensionHint}" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+                <Button Content="Export" Command="{Binding ConfirmCommand}" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type dialogs:BulkLabelImportDialogViewModel}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Left" FontWeight="SemiBold" Text="Label Set (one per line)" />
+                <Button DockPanel.Dock="Right" Content="Load From File" Command="{Binding LoadFromFileCommand}" />
+            </DockPanel>
+            <TextBox Grid.Row="1" Margin="0,10,0,0" MinHeight="220" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding LabelNamesText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+                <Button Content="Update Labels" Command="{Binding ConfirmCommand}" IsDefault="True" />
+            </StackPanel>
+        </Grid>
+    </DataTemplate>
+    <DataTemplate DataType="{x:Type dialogs:ConfirmActionDialogViewModel}">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" />
+            <Button Content="{Binding ActionText}" Command="{Binding ConfirmCommand}" IsDefault="True" />
+        </StackPanel>
+    </DataTemplate>
+</ResourceDictionary>
