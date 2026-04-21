@@ -17,6 +17,14 @@
     <ProjectReference Include="..\Makesense.Formats\Makesense.Formats.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="obj-updated2\**\*.cs" />
+    <EmbeddedResource Remove="obj-updated2\**\*" />
+    <None Remove="obj-updated2\**\*" />
+    <Page Remove="obj-updated2\**\*.xaml" />
+    <Resource Remove="obj-updated2\**\*" />
+  </ItemGroup>
+
   <Target Name="CopyNativeRuntime" AfterTargets="Build">
     <ItemGroup>
       <NativeRuntime Include="..\artifacts\core\$(Configuration)\*.dll" Condition="Exists('..\artifacts\core\$(Configuration)')" />

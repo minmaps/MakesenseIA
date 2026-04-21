@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
 using System.Globalization;
@@ -66,6 +67,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private int _inferenceBatchCompletedImages;
     private int _inferenceBatchTotalImages;
     private bool _isInferenceBatchRunning;
+    private int _importCompletedImages;
+    private int _importTotalImages;
+    private bool _isImportRunning;
+    private string _importProgressMessage = "No import running.";
 
     public MainWindowViewModel(
         PerformanceConfigService performanceConfigService,
@@ -127,14 +132,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AnnotationTool.ImageRecognition
         ];
 
-        OpenImagesCommand = new RelayCommand(OpenImages);
-        AddImagesCommand = new RelayCommand(AddImages, () => Images.Count > 0);
-        OpenProjectCommand = new RelayCommand(OpenProject);
+        OpenImagesCommand = new RelayCommand(OpenImages, () => !IsImportRunning);
+        AddImagesCommand = new RelayCommand(AddImages, () => Images.Count > 0 && !IsImportRunning);
+        OpenProjectCommand = new RelayCommand(OpenProject, () => !IsImportRunning);
         ExportManifestCommand = new RelayCommand(ExportManifest);
-        ImportAnnotationsCommand = new RelayCommand(OpenImportAnnotationsDialog, () => Images.Count > 0);
-        ExportAnnotationsCommand = new RelayCommand(OpenExportAnnotationsDialog, () => Images.Count > 0);
+        ImportAnnotationsCommand = new RelayCommand(OpenImportAnnotationsDialog, () => Images.Count > 0 && !IsImportRunning);
+        ExportAnnotationsCommand = new RelayCommand(OpenExportAnnotationsDialog, () => Images.Count > 0 && !IsImportRunning);
         ApplyPerformanceLimitsCommand = new RelayCommand(ApplyPerformanceLimits);
-        RunInferenceCommand = new RelayCommand(OpenInferenceDialog);
+        RunInferenceCommand = new RelayCommand(OpenInferenceDialog, () => !IsImportRunning);
         AddLabelCommand = new RelayCommand(AddLabel);
         OpenLabelManagerCommand = new RelayCommand(OpenLabelManagerDialog);
         RemoveLabelCommand = new RelayCommand(RemoveLabel, () => SelectedLabel is not null);
@@ -171,9 +176,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         LoadSelectedAnnotationEditor();
     }
 
-    public ObservableCollection<ImageRecord> Images { get; } = [];
+    public ObservableCollection<ImageRecord> Images { get; } = new BulkObservableCollection<ImageRecord>();
 
-    public ObservableCollection<LabelClass> Labels { get; } = [];
+    public ObservableCollection<LabelClass> Labels { get; } = new BulkObservableCollection<LabelClass>();
 
     public ObservableCollection<AnnotationItemViewModel> Annotations { get; } = [];
 
@@ -289,6 +294,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _isInferenceBatchRunning;
         private set => SetProperty(ref _isInferenceBatchRunning, value);
+    }
+
+    public double ImportProgressPercent => _importTotalImages == 0
+        ? 0
+        : 100.0 * _importCompletedImages / _importTotalImages;
+
+    public string ImportProgressLabel => _importTotalImages == 0
+        ? "Idle"
+        : $"{_importCompletedImages}/{_importTotalImages}";
+
+    public string ImportProgressMessage
+    {
+        get => _importProgressMessage;
+        private set => SetProperty(ref _importProgressMessage, value);
+    }
+
+    public bool IsImportRunning
+    {
+        get => _isImportRunning;
+        private set
+        {
+            if (SetProperty(ref _isImportRunning, value))
+            {
+                RaiseImportCommandCanExecuteChanged();
+            }
+        }
     }
 
     public ModalDialogViewModel? ActiveDialog
@@ -666,8 +697,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StatusMessage = $"Loaded manifest with {Images.Count} images and {Labels.Count} labels.";
     }
 
-    private void OpenImages()
+    private async void OpenImages()
     {
+        if (IsImportRunning)
+        {
+            StatusMessage = "Image import is already running.";
+            return;
+        }
+
         var dialog = new OpenFileDialog
         {
             Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.webp",
@@ -679,26 +716,54 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var images = dialog.FileNames.Select(_imageMetadataService.CreateRecord).ToArray();
-        ReplaceState(new ProjectState
+        try
         {
-            Name = "makesense-native",
-            ProjectKind = ProjectKind.ObjectDetection,
-            ProjectPath = "Loose image session",
-            PerformanceConfig = Performance.ToModel(),
-            Images = images,
-            Labels = _projectState.Labels
-        });
+            var importResult = await LoadImageRecordsAsync(dialog.FileNames, "Importing images");
+            if (importResult.Images.Length == 0)
+            {
+                StatusMessage = importResult.FailedCount > 0
+                    ? $"Unable to import {importResult.FailedCount} selected image(s)."
+                    : "No images were selected.";
+                return;
+            }
 
-        ResetInferenceBatchState();
-        ProjectPath = "Loose image session";
-        EngineSession.OpenImages(dialog.FileNames);
-        SelectedImage = Images.FirstOrDefault();
-        StatusMessage = $"{Images.Count} images loaded into the desktop session.";
+            ImportProgressMessage = "Registering images in native engine...";
+            ReplaceState(new ProjectState
+            {
+                Name = "makesense-native",
+                ProjectKind = ProjectKind.ObjectDetection,
+                ProjectPath = "Loose image session",
+                PerformanceConfig = Performance.ToModel(),
+                Images = importResult.Images,
+                Labels = _projectState.Labels
+            });
+
+            ResetInferenceBatchState();
+            ProjectPath = "Loose image session";
+            await Task.Run(() => EngineSession.OpenImages(importResult.Images.Select(image => image.Path)));
+            SelectedImage = Images.FirstOrDefault();
+            StatusMessage = importResult.FailedCount == 0
+                ? $"{Images.Count} images loaded into the desktop session."
+                : $"{Images.Count} images loaded. {importResult.FailedCount} unreadable image(s) were skipped.";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+        }
+        finally
+        {
+            EndImageImport();
+        }
     }
 
-    private void AddImages()
+    private async void AddImages()
     {
+        if (IsImportRunning)
+        {
+            StatusMessage = "Image import is already running.";
+            return;
+        }
+
         var dialog = new OpenFileDialog
         {
             Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.webp",
@@ -723,14 +788,79 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var appendedImages = _projectState.Images
-            .Concat(newImagePaths.Select(_imageMetadataService.CreateRecord))
-            .ToArray();
+        try
+        {
+            var importResult = await LoadImageRecordsAsync(newImagePaths, "Adding images");
+            if (importResult.Images.Length == 0)
+            {
+                StatusMessage = importResult.FailedCount > 0
+                    ? $"Unable to add {importResult.FailedCount} selected image(s)."
+                    : "No new images were added.";
+                return;
+            }
 
-        ReplaceState(_projectState.ReplaceImages(appendedImages));
-        ResetInferenceBatchState();
-        EngineSession.OpenImages(appendedImages.Select(image => image.Path));
-        StatusMessage = $"{newImagePaths.Length} image(s) added to the current session.";
+            var appendedImages = _projectState.Images
+                .Concat(importResult.Images)
+                .ToArray();
+
+            ImportProgressMessage = "Registering images in native engine...";
+            ReplaceState(_projectState.ReplaceImages(appendedImages));
+            ResetInferenceBatchState();
+            await Task.Run(() => EngineSession.OpenImages(appendedImages.Select(image => image.Path)));
+            StatusMessage = importResult.FailedCount == 0
+                ? $"{importResult.Images.Length} image(s) added to the current session."
+                : $"{importResult.Images.Length} image(s) added. {importResult.FailedCount} unreadable image(s) were skipped.";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+        }
+        finally
+        {
+            EndImageImport();
+        }
+    }
+
+    private sealed record ImageImportResult(ImageRecord[] Images, int FailedCount);
+
+    private async Task<ImageImportResult> LoadImageRecordsAsync(IReadOnlyList<string> imagePaths, string operationName)
+    {
+        BeginImageImport(imagePaths.Count, operationName);
+        if (imagePaths.Count == 0)
+        {
+            return new ImageImportResult([], 0);
+        }
+
+        var reportEvery = Math.Max(1, imagePaths.Count / 100);
+        var result = await Task.Run(() =>
+        {
+            var records = new List<ImageRecord>(imagePaths.Count);
+            var failedCount = 0;
+
+            for (var index = 0; index < imagePaths.Count; index++)
+            {
+                var path = imagePaths[index];
+                try
+                {
+                    records.Add(_imageMetadataService.CreateRecord(path));
+                }
+                catch
+                {
+                    failedCount++;
+                }
+
+                var completed = index + 1;
+                if (completed == imagePaths.Count || completed % reportEvery == 0)
+                {
+                    ReportImageImportProgress(completed, Path.GetFileName(path));
+                }
+            }
+
+            return new ImageImportResult(records.ToArray(), failedCount);
+        });
+
+        UpdateImageImportProgress(imagePaths.Count, $"{operationName}: metadata ready.");
+        return result;
     }
 
     private async void ExportManifest()
@@ -1985,6 +2115,67 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
     }
 
+    private void BeginImageImport(int totalImages, string message)
+    {
+        _importCompletedImages = 0;
+        _importTotalImages = Math.Max(0, totalImages);
+        ImportProgressMessage = message;
+        IsImportRunning = true;
+        RaisePropertyChanged(nameof(ImportProgressPercent));
+        RaisePropertyChanged(nameof(ImportProgressLabel));
+        StatusMessage = $"{message}: 0/{_importTotalImages}";
+    }
+
+    private void ReportImageImportProgress(int completedImages, string currentFileName)
+    {
+        if (_uiDispatcher.CheckAccess())
+        {
+            UpdateImageImportProgress(completedImages, $"Reading metadata: {currentFileName}");
+            return;
+        }
+
+        _ = _uiDispatcher.BeginInvoke(() =>
+            UpdateImageImportProgress(completedImages, $"Reading metadata: {currentFileName}"));
+    }
+
+    private void UpdateImageImportProgress(int completedImages, string message)
+    {
+        if (!IsImportRunning)
+        {
+            return;
+        }
+
+        if (completedImages < _importCompletedImages)
+        {
+            return;
+        }
+
+        _importCompletedImages = Math.Clamp(completedImages, 0, _importTotalImages);
+        ImportProgressMessage = message;
+        RaisePropertyChanged(nameof(ImportProgressPercent));
+        RaisePropertyChanged(nameof(ImportProgressLabel));
+    }
+
+    private void EndImageImport()
+    {
+        IsImportRunning = false;
+        _importCompletedImages = 0;
+        _importTotalImages = 0;
+        ImportProgressMessage = "No import running.";
+        RaisePropertyChanged(nameof(ImportProgressPercent));
+        RaisePropertyChanged(nameof(ImportProgressLabel));
+    }
+
+    private void RaiseImportCommandCanExecuteChanged()
+    {
+        OpenImagesCommand.RaiseCanExecuteChanged();
+        AddImagesCommand.RaiseCanExecuteChanged();
+        OpenProjectCommand.RaiseCanExecuteChanged();
+        ImportAnnotationsCommand.RaiseCanExecuteChanged();
+        ExportAnnotationsCommand.RaiseCanExecuteChanged();
+        RunInferenceCommand.RaiseCanExecuteChanged();
+    }
+
     private void UpdateInferenceRuntime(NativeInferenceResultSummary? summary)
     {
         if (summary is null)
@@ -2174,10 +2365,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private static void SyncCollection<T>(ObservableCollection<T> collection, IEnumerable<T> items)
     {
+        if (collection is BulkObservableCollection<T> bulkCollection)
+        {
+            bulkCollection.ReplaceAll(items);
+            return;
+        }
+
         collection.Clear();
         foreach (var item in items)
         {
             collection.Add(item);
+        }
+    }
+
+    private sealed class BulkObservableCollection<T> : ObservableCollection<T>
+    {
+        public void ReplaceAll(IEnumerable<T> items)
+        {
+            Items.Clear();
+            foreach (var item in items)
+            {
+                Items.Add(item);
+            }
+
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
         }
     }
 
