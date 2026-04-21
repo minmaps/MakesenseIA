@@ -1,63 +1,53 @@
+using System.Runtime.InteropServices;
 using Makesense.Desktop.Services;
+using Makesense.Desktop.Interop;
 using Makesense.Formats.Contracts;
 
 namespace Makesense.Desktop.Tests;
 
 public sealed class InferenceSuggestionServiceTests
 {
+    [DllImport("kernel32.dll")]
+    private static extern nint GetConsoleWindow();
+
     [Fact]
-    public void GenerateSuggestions_CreatesRectSuggestionsForDetection()
+    public void NativeEngineSession_WhenUnattached_ReturnsNoInferenceSummary()
     {
-        var service = new InferenceSuggestionService();
-        var image = new ImageRecord
-        {
-            Id = "img-1",
-            Path = @"C:\images\sample.png",
-            FileName = "sample.png",
-            FileSizeBytes = 12,
-            PixelSize = new Size2D(1920, 1080)
-        };
-        var labels = new[]
-        {
-            new LabelClass
-            {
-                Id = "label-1",
-                Name = "car"
-            }
-        };
+        using var session = new NativeEngineSession();
 
-        var suggestions = service.GenerateSuggestions(image, "rect-detection", @"C:\models\detector.onnx", labels, Array.Empty<AnnotationRecord>());
-
-        Assert.NotEmpty(suggestions);
-        Assert.All(suggestions, suggestion =>
-        {
-            Assert.Equal(AnnotationKind.Rect, suggestion.Kind);
-            Assert.Equal("car", suggestion.SuggestedLabel);
-            Assert.NotNull(suggestion.Rect);
-        });
+        Assert.Null(session.ReadLatestInferenceSummary());
+        Assert.Empty(session.ReadLatestInferenceSuggestions());
     }
 
     [Fact]
-    public void GenerateSuggestions_CreatesPointSuggestionsForPose()
+    public void NativeEngineSession_AttachAndOpenImages_UsesRealRepositoryAsset()
     {
-        var service = new InferenceSuggestionService();
-        var image = new ImageRecord
+        var hwnd = GetConsoleWindow();
+        if (hwnd == nint.Zero)
         {
-            Id = "img-2",
-            Path = @"C:\images\pose.png",
-            FileName = "pose.png",
-            FileSizeBytes = 12,
-            PixelSize = new Size2D(800, 600)
-        };
+            return;
+        }
 
-        var suggestions = service.GenerateSuggestions(image, "pose-estimation", @"C:\models\pose.onnx", Array.Empty<LabelClass>(), Array.Empty<AnnotationRecord>());
+        var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        var imagePath = Path.Combine(workspaceRoot, "public", "ico", "main-image-color.png");
+        Assert.True(File.Exists(imagePath), $"Expected repo asset at {imagePath}.");
 
-        Assert.Equal(5, suggestions.Count);
-        Assert.All(suggestions, suggestion =>
+        using var session = new NativeEngineSession();
+        session.Attach(hwnd, 640, 480, new PerformanceConfig
         {
-            Assert.Equal(AnnotationKind.Point, suggestion.Kind);
-            Assert.Equal("pose", suggestion.SuggestedLabel);
-            Assert.NotNull(suggestion.Point);
+            MaxRamMb = 1024,
+            MaxVramMb = 1024,
+            MaxDecodeThreads = 2,
+            MaxIoThreads = 2,
+            MaxInferenceJobs = 1,
+            MaxPrefetchImages = 4
         });
+
+        Assert.True(session.IsAttached);
+
+        session.OpenImages([imagePath]);
+        session.SetActiveImage(imagePath);
+        Assert.Null(session.ReadLatestInferenceSummary());
+        Assert.Empty(session.ReadLatestInferenceSuggestions());
     }
 }

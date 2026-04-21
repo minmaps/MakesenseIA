@@ -1,7 +1,9 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using Makesense.Formats.Contracts;
 
 namespace Makesense.Desktop.Controls;
@@ -105,6 +107,7 @@ public sealed class EditorOverlayControl : Canvas
     private readonly Pen _suggestionPen = new(new SolidColorBrush(Color.FromRgb(255, 112, 67)), 2.0) { DashStyle = DashStyles.Dash };
     private readonly Brush _pointBrush = new SolidColorBrush(Color.FromRgb(255, 255, 255));
     private readonly Brush _handleBrush = new SolidColorBrush(Color.FromRgb(255, 196, 0));
+    private readonly Brush _imagePlaceholderBrush = new SolidColorBrush(Color.FromRgb(10, 18, 30));
     private readonly List<Point2D> _pendingPolygon = [];
 
     private OverlayInteractionMode _interactionMode = OverlayInteractionMode.None;
@@ -116,6 +119,8 @@ public sealed class EditorOverlayControl : Canvas
     private double _panOriginX;
     private double _panOriginY;
     private int _activeVertexIndex = -1;
+    private string? _loadedImagePath;
+    private ImageSource? _loadedImageSource;
 
     public EditorOverlayControl()
     {
@@ -223,11 +228,30 @@ public sealed class EditorOverlayControl : Canvas
             return;
         }
 
+        if (TryGetImageSource(out var imageSource))
+        {
+            dc.DrawImage(imageSource, imageRect.Value);
+        }
+        else
+        {
+            dc.DrawRectangle(_imagePlaceholderBrush, null, imageRect.Value);
+        }
+
         dc.DrawRectangle(null, new Pen(new SolidColorBrush(Color.FromArgb(80, 255, 255, 255)), 1), imageRect.Value);
 
         foreach (var annotation in Annotations)
         {
             if (!annotation.IsVisible)
+            {
+                continue;
+            }
+
+            // While moving/resizing an existing annotation, render only the live preview
+            // instead of stacking the stale geometry underneath it.
+            if (_previewAnnotation is not null &&
+                _dragSeedAnnotation is not null &&
+                _interactionMode != OverlayInteractionMode.Creating &&
+                string.Equals(annotation.Id, _dragSeedAnnotation.Id, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -825,6 +849,46 @@ public sealed class EditorOverlayControl : Canvas
     private void RaiseTransformChanged()
     {
         ViewportTransformChanged?.Invoke(this, new ViewportTransformChangedEventArgs(Zoom, PanOffsetX, PanOffsetY));
+    }
+
+    private bool TryGetImageSource(out ImageSource? imageSource)
+    {
+        imageSource = null;
+        var imagePath = Image?.Path;
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+        {
+            _loadedImagePath = null;
+            _loadedImageSource = null;
+            return false;
+        }
+
+        if (string.Equals(_loadedImagePath, imagePath, StringComparison.OrdinalIgnoreCase) && _loadedImageSource is not null)
+        {
+            imageSource = _loadedImageSource;
+            return true;
+        }
+
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.UriSource = new Uri(imagePath, UriKind.Absolute);
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            bitmap.EndInit();
+            bitmap.Freeze();
+
+            _loadedImagePath = imagePath;
+            _loadedImageSource = bitmap;
+            imageSource = bitmap;
+            return true;
+        }
+        catch
+        {
+            _loadedImagePath = imagePath;
+            _loadedImageSource = null;
+            return false;
+        }
     }
 
     private static AnnotationRecord BuildRectAnnotation(Point2D start, Point2D end, string? labelId)

@@ -38,6 +38,8 @@ struct inference_run_result
 {
     std::wstring backend_name;
     std::wstring provider_name;
+    ms_result_code result_code{MS_RESULT_OK};
+    std::wstring status_message;
     std::vector<native_inference_suggestion> suggestions;
 };
 
@@ -52,8 +54,3 @@ public:
 };
 
 std::unique_ptr<inference_backend> create_inference_backend();
-std::vector<native_inference_suggestion> build_synthetic_inference_suggestions(
-    const std::wstring& image_path,
-    const std::wstring& model_path,
-    const std::wstring& task_name,
-    D2D1_SIZE_F image_size);

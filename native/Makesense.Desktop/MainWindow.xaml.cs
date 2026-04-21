@@ -1,12 +1,17 @@
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Controls;
 using Makesense.Desktop.Controls;
 using Makesense.Desktop.ViewModels;
+using System.ComponentModel;
+using System.Windows.Threading;
 
 namespace Makesense.Desktop;
 
 public partial class MainWindow : Window
 {
+    private MainWindowViewModel? _viewModel;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -22,11 +27,27 @@ public partial class MainWindow : Window
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        RenderHost.Session = (DataContext as MainWindowViewModel)?.EngineSession;
+        if (_viewModel is not null)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+
+        _viewModel = DataContext as MainWindowViewModel;
+        if (_viewModel is not null)
+        {
+            _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        }
+
+        RenderHost.Session = _viewModel?.EngineSession;
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        if (_viewModel is not null)
+        {
+            _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+
         EditorOverlay.AnnotationCreated -= OnAnnotationCreated;
         EditorOverlay.AnnotationUpdated -= OnAnnotationUpdated;
         EditorOverlay.AnnotationSelectionChanged -= OnAnnotationSelectionChanged;
@@ -38,6 +59,22 @@ public partial class MainWindow : Window
         {
             disposable.Dispose();
         }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(MainWindowViewModel.IsDialogOpen) || _viewModel?.IsDialogOpen != false)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_viewModel?.SelectedImage is not null)
+            {
+                EditorOverlay.Focus();
+            }
+        }, DispatcherPriority.Input);
     }
 
     private void OnAnnotationCreated(object? sender, AnnotationRecordEventArgs e)
@@ -68,6 +105,11 @@ public partial class MainWindow : Window
     private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        if (IsTextInputSource(e.OriginalSource))
         {
             return;
         }
@@ -205,6 +247,26 @@ public partial class MainWindow : Window
             }
         }
 
+        if ((Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) == 0)
+        {
+            switch (e.Key)
+            {
+                case System.Windows.Input.Key.Left:
+                    viewModel.SelectPreviousImage();
+                    e.Handled = true;
+                    return;
+                case System.Windows.Input.Key.Right:
+                    if (viewModel.AcceptAllSuggestionsCommand.CanExecute(null))
+                    {
+                        viewModel.AcceptAllSuggestionsCommand.Execute(null);
+                    }
+
+                    viewModel.SelectNextImage();
+                    e.Handled = true;
+                    return;
+            }
+        }
+
         var step = (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Shift) == System.Windows.Input.ModifierKeys.Shift ? 10.0 : 1.0;
         switch (e.Key)
         {
@@ -225,5 +287,13 @@ public partial class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    private static bool IsTextInputSource(object? originalSource)
+    {
+        return originalSource is TextBox
+            or RichTextBox
+            or PasswordBox
+            or ComboBox;
     }
 }

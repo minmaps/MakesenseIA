@@ -13,6 +13,8 @@ import GenericLabelTypePopup from '../GenericLabelTypePopup/GenericLabelTypePopu
 import { ExportFormatData } from '../../../data/ExportFormatData';
 import { AppState } from '../../../store';
 import { connect } from 'react-redux';
+import { ContextManager } from '../../../logic/context/ContextManager';
+import { ContextType } from '../../../data/enums/ContextType';
 
 interface IProps {
     activeLabelType: LabelType,
@@ -41,10 +43,12 @@ const ExportLabelPopup: React.FC<IProps> = ({ activeLabelType }) => {
                 break;
         }
         PopupActions.close();
+        ContextManager.switchCtx(ContextType.EDITOR);
     };
 
     const onReject = (type: LabelType) => {
         PopupActions.close();
+        ContextManager.switchCtx(ContextType.EDITOR);
     };
 
     const onSelect = (type: AnnotationFormatType) => {

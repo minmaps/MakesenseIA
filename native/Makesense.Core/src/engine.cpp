@@ -228,6 +228,18 @@ ms_result_code native_engine::run_inference(const ms_inference_request& request)
 
     if (model_size > to_bytes(performance_.max_vram_mb))
     {
+        std::scoped_lock lock(state_mutex_);
+        clear_latest_inference_result_locked();
+        store_latest_inference_result_locked(
+            0,
+            active_image_,
+            request.model_path,
+            request.task_name,
+            L"Rejected",
+            L"VRAM budget",
+            L"Model rejected because it exceeds the configured VRAM budget.",
+            MS_RESULT_RESOURCE_LIMIT,
+            {});
         update_status(L"Model rejected because it exceeds the configured VRAM budget.");
         return MS_RESULT_RESOURCE_LIMIT;
     }
@@ -242,6 +254,18 @@ ms_result_code native_engine::run_inference(const ms_inference_request& request)
 
     if (active_image_path.empty())
     {
+        std::scoped_lock lock(state_mutex_);
+        clear_latest_inference_result_locked();
+        store_latest_inference_result_locked(
+            0,
+            L"",
+            request.model_path,
+            request.task_name,
+            L"Rejected",
+            L"No active image",
+            L"Inference rejected because no active image is selected.",
+            MS_RESULT_NOT_FOUND,
+            {});
         update_status(L"Inference rejected because no active image is selected.");
         return MS_RESULT_NOT_FOUND;
     }
@@ -281,12 +305,31 @@ ms_result_code native_engine::run_inference(const ms_inference_request& request)
 
         if (backend_result != MS_RESULT_OK)
         {
+            store_latest_inference_result_locked(
+                generation,
+                active_image_path,
+                model_path,
+                task_name,
+                inference_result.backend_name,
+                inference_result.provider_name,
+                status_message,
+                backend_result,
+                {});
             update_status(status_message.empty() ? L"Inference backend failed." : status_message);
             return;
         }
 
         vram_cache_.touch(model_path, static_cast<std::size_t>(std::min<std::uintmax_t>(model_size, to_bytes(performance_.max_vram_mb))));
-        store_latest_inference_result_locked(generation, active_image_path, model_path, task_name, std::move(inference_result.suggestions));
+        store_latest_inference_result_locked(
+            generation,
+            active_image_path,
+            model_path,
+            task_name,
+            inference_result.backend_name,
+            inference_result.provider_name,
+            status_message,
+            backend_result,
+            std::move(inference_result.suggestions));
         update_status(status_message.empty()
             ? L"Inference results ready for " + task_name + L" using " + inference_result.backend_name + L"."
             : status_message);
@@ -303,7 +346,10 @@ ms_result_code native_engine::get_latest_inference_summary(ms_inference_result_s
     }
 
     std::scoped_lock lock(state_mutex_);
-    if (latest_inference_suggestions_.empty())
+    if (latest_inference_generation_ == 0 &&
+        latest_inference_result_code_ == MS_RESULT_NOT_FOUND &&
+        latest_inference_model_path_.empty() &&
+        latest_inference_status_message_.empty())
     {
         return MS_RESULT_NOT_FOUND;
     }
@@ -312,8 +358,12 @@ ms_result_code native_engine::get_latest_inference_summary(ms_inference_result_s
     copy_wstring(summary->active_image_path, latest_inference_active_image_);
     copy_wstring(summary->model_path, latest_inference_model_path_);
     copy_wstring(summary->task_name, latest_inference_task_name_);
+    copy_wstring(summary->backend_name, latest_inference_backend_name_);
+    copy_wstring(summary->provider_name, latest_inference_provider_name_);
+    copy_wstring(summary->status_message, latest_inference_status_message_);
     summary->suggestion_count = static_cast<std::uint32_t>(latest_inference_suggestions_.size());
     summary->generation = latest_inference_generation_;
+    summary->result_code = latest_inference_result_code_;
     return MS_RESULT_OK;
 }
 
@@ -625,35 +675,8 @@ D2D1_RECT_F native_engine::compute_image_dest_rect() const
 
 void native_engine::render_overlay()
 {
-    std::wstringstream text_stream;
-    {
-        std::scoped_lock lock(state_mutex_);
-        text_stream << L"Makesense Native Core\n";
-        text_stream << L"Project: " << (project_path_.empty() ? L"(loose images)" : project_path_) << L"\n";
-        text_stream << L"GPU: " << gpu_name_ << L"\n";
-        text_stream << L"CUDA runtime: " << (cuda_runtime_available_ ? L"available" : L"missing") << L" | TensorRT: " << (tensorrt_runtime_available_ ? L"available" : L"missing") << L"\n";
-        text_stream << L"Inference backend: " << (inference_backend_ ? inference_backend_->backend_summary() : L"(none)") << L"\n";
-        text_stream << L"Images: " << images_.size() << L"\n";
-        text_stream << L"Active: " << (active_image_.empty() ? L"(none)" : std::filesystem::path(active_image_).filename().wstring()) << L"\n";
-        text_stream << L"Zoom: " << zoom_ << L"x\n";
-        text_stream << L"RAM cache: " << static_cast<double>(ram_cache_.current_bytes()) / (1024.0 * 1024.0) << L" MB / " << performance_.max_ram_mb << L" MB\n";
-        text_stream << L"VRAM cache: " << static_cast<double>(vram_cache_.current_bytes()) / (1024.0 * 1024.0) << L" MB / " << performance_.max_vram_mb << L" MB\n";
-        text_stream << L"Status: " << last_status_;
-    }
-
-    const auto panel_rect = D2D1::RectF(24.0f, 24.0f, static_cast<float>(width_) - 24.0f, 260.0f);
-    d2d_context_->FillRoundedRectangle(D2D1::RoundedRect(panel_rect, 12.0f, 12.0f), panel_brush_.Get());
-    d2d_context_->DrawTextW(
-        text_stream.str().c_str(),
-        static_cast<UINT32>(text_stream.str().size()),
-        text_format_.Get(),
-        D2D1::RectF(40.0f, 40.0f, static_cast<float>(width_) - 40.0f, 260.0f),
-        accent_brush_.Get());
-
-    const auto center_x = mouse_x_ <= 0.0f ? static_cast<float>(width_) / 2.0f : mouse_x_;
-    const auto center_y = mouse_y_ <= 0.0f ? static_cast<float>(height_) / 2.0f : mouse_y_;
-    d2d_context_->DrawLine(D2D1::Point2F(center_x - 20.0f, center_y), D2D1::Point2F(center_x + 20.0f, center_y), accent_brush_.Get(), 2.0f);
-    d2d_context_->DrawLine(D2D1::Point2F(center_x, center_y - 20.0f), D2D1::Point2F(center_x, center_y + 20.0f), accent_brush_.Get(), 2.0f);
+    // The desktop shell owns status and image metadata surfaces.
+    // Keep the native viewport free from debug text so image annotation stays unobstructed.
 }
 
 void native_engine::probe_runtime_support()
@@ -684,6 +707,10 @@ void native_engine::clear_latest_inference_result_locked()
     latest_inference_active_image_.clear();
     latest_inference_model_path_.clear();
     latest_inference_task_name_.clear();
+    latest_inference_backend_name_.clear();
+    latest_inference_provider_name_.clear();
+    latest_inference_status_message_.clear();
+    latest_inference_result_code_ = MS_RESULT_NOT_FOUND;
     latest_inference_suggestions_.clear();
 }
 
@@ -692,12 +719,20 @@ void native_engine::store_latest_inference_result_locked(
     const std::wstring& image_path,
     const std::wstring& model_path,
     const std::wstring& task_name,
+    const std::wstring& backend_name,
+    const std::wstring& provider_name,
+    const std::wstring& status_message,
+    ms_result_code result_code,
     std::vector<native_inference_suggestion> suggestions)
 {
     latest_inference_generation_ = generation;
     latest_inference_active_image_ = image_path;
     latest_inference_model_path_ = model_path;
     latest_inference_task_name_ = task_name;
+    latest_inference_backend_name_ = backend_name;
+    latest_inference_provider_name_ = provider_name;
+    latest_inference_status_message_ = status_message;
+    latest_inference_result_code_ = result_code;
     latest_inference_suggestions_ = std::move(suggestions);
 }
 

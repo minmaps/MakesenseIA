@@ -20,6 +20,7 @@
             </ResourceDictionary.MergedDictionaries>
             <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter" />
+            <converters:ImageThumbnailConverter x:Key="ImageThumbnailConverter" DecodePixelWidth="192" />
             <Style x:Key="PanelCardStyle" TargetType="Border">
                 <Setter Property="Background" Value="{StaticResource PanelBackgroundBrush}" />
                 <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
@@ -112,9 +113,9 @@
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="342" />
+                <ColumnDefinition Width="420" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="388" />
+                <ColumnDefinition Width="360" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource PanelCardStyle}">
@@ -122,11 +123,11 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="2*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="150" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="130" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="165" />
                     </Grid.RowDefinitions>
                     <DockPanel Grid.Row="0" Margin="0,0,0,12">
                         <StackPanel DockPanel.Dock="Left">
@@ -165,22 +166,44 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
-                    <Border Grid.Row="2" Style="{StaticResource SectionSurfaceStyle}" Padding="0">
-                        <ListBox ItemsSource="{Binding FilteredImagesView}" SelectedItem="{Binding SelectedImage, Mode=TwoWay}" BorderThickness="0" Background="Transparent" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <Border Grid.Row="2" Style="{StaticResource SectionSurfaceStyle}" Padding="10">
+                        <ListBox ItemsSource="{Binding FilteredImagesView}"
+                                 SelectedItem="{Binding SelectedImage, Mode=TwoWay}"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.CanContentScroll="False"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling">
+                            <ListBox.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ListBox.ItemsPanel>
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="Margin" Value="0,0,10,10" />
+                                    <Setter Property="Width" Value="176" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Border Padding="10" Margin="0,0,0,4">
+                                    <Border Padding="10" Height="176" Background="#132034" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="16">
                                         <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="56" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Border Width="48" Height="48" Background="#142238" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12">
-                                                <Image Stretch="UniformToFill" Source="{Binding Path}" />
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="100" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Border Background="#142238" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" ClipToBounds="True">
+                                                <Image Stretch="UniformToFill" Source="{Binding Path, Converter={StaticResource ImageThumbnailConverter}}" />
                                             </Border>
-                                            <StackPanel Grid.Column="1" Margin="10,0,0,0">
-                                                <TextBlock FontWeight="SemiBold" Text="{Binding FileName}" />
-                                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding Annotations.Count, StringFormat=Annotations: {0}}" />
+                                            <StackPanel Grid.Row="1" Margin="0,10,0,0" VerticalAlignment="Top">
+                                                <TextBlock FontWeight="SemiBold" FontSize="13" Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding Annotations.Count, StringFormat=Annotations: {0}}" />
+                                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding PixelSize.Width, StringFormat=Largeur: {0:0}px}" />
                                             </StackPanel>
                                         </Grid>
                                     </Border>
@@ -250,6 +273,9 @@
                         <StackPanel Grid.Column="2" Margin="16,0">
                             <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Modèle actif" />
                             <TextBox Margin="0,8,0,0" Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                            <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="Image active" />
+                            <TextBlock Margin="0,4,0,0" Text="{Binding SelectedImageSummary}" TextWrapping="Wrap" />
+                            <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding ActiveInferenceRuntime}" TextWrapping="Wrap" />
                         </StackPanel>
                         <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Style="{StaticResource CompactButtonStyle}" Content="Accept image" Command="{Binding AcceptAllSuggestionsCommand}" />
@@ -259,7 +285,6 @@
                 </Border>
                 <Border Grid.Row="1" Style="{StaticResource PanelCardStyle}" Margin="10,6,10,10">
                     <Grid>
-                        <controls:NativeRenderHost x:Name="RenderHost" />
                         <controls:EditorOverlayControl x:Name="EditorOverlay"
                                                        Image="{Binding SelectedImage}"
                                                        Annotations="{Binding CurrentAnnotations}"
@@ -269,18 +294,6 @@
                                                        PanOffsetX="{Binding PanOffsetX}"
                                                        PanOffsetY="{Binding PanOffsetY}"
                                                        Panel.ZIndex="2" />
-                        <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="18" Padding="14,12" Background="#D2142235" BorderBrush="#3A587E" BorderThickness="1" CornerRadius="16">
-                            <StackPanel>
-                                <TextBlock FontWeight="SemiBold" FontSize="16" Text="Editor viewport" />
-                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding RenderHostHint}" />
-                            </StackPanel>
-                        </Border>
-                        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="18" Padding="14,12" Background="#D2142235" BorderBrush="#2A405E" BorderThickness="1" CornerRadius="16">
-                            <StackPanel>
-                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Image active" />
-                                <TextBlock FontWeight="SemiBold" Text="{Binding SelectedImageSummary}" />
-                            </StackPanel>
-                        </Border>
                         <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="26" Background="#F2131E2F" BorderBrush="#37557A" BorderThickness="1" CornerRadius="22" Visibility="{Binding HasFilteredImages, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                             <StackPanel HorizontalAlignment="Center">
                                 <TextBlock HorizontalAlignment="Center" FontSize="22" FontWeight="SemiBold" Text="{Binding EmptyStateMessage}" />
@@ -307,12 +320,18 @@
                                     <Border Style="{StaticResource MetricCardStyle}" Margin="0">
                                         <StackPanel>
                                             <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Progression" />
-                                            <TextBlock FontSize="22" FontWeight="Bold" Text="{Binding ProjectProgressPercent, StringFormat={}{0:0}%}" />
+                                            <TextBlock FontSize="22" FontWeight="Bold" Text="{Binding InferenceBatchProgressPercent, Mode=OneWay, StringFormat={}{0:0}%}" />
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding InferenceBatchProgressLabel, Mode=OneWay}" />
                                         </StackPanel>
                                     </Border>
                                 </WrapPanel>
                                 <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Active model" />
                                 <TextBox Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                                <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="Backend runtime" />
+                                <TextBlock FontWeight="SemiBold" Text="{Binding ActiveInferenceBackend}" />
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding ActiveInferenceProvider}" />
+                                <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding ActiveInferenceRuntime}" TextWrapping="Wrap" />
+                                <ProgressBar Margin="0,8,0,0" Maximum="100" Value="{Binding InferenceBatchProgressPercent, Mode=OneWay}" />
                                 <WrapPanel Margin="0,8,0,0">
                                     <Button Style="{StaticResource CompactButtonStyle}" Content="Accept image" Command="{Binding AcceptAllSuggestionsCommand}" />
                                     <Button Style="{StaticResource CompactButtonStyle}" Content="Reject image" Command="{Binding RejectAllSuggestionsCommand}" />
@@ -427,6 +446,16 @@
                 <TextBlock VerticalAlignment="Center" HorizontalAlignment="Center" FontWeight="SemiBold" Style="{StaticResource CaptionTextStyle}" Text="{Binding StatusMessage}" />
             </DockPanel>
         </Border>
+
+        <controls:NativeRenderHost x:Name="RenderHost"
+                                   Grid.RowSpan="4"
+                                   Width="1"
+                                   Height="1"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Bottom"
+                                   Margin="0,0,1,1"
+                                   IsHitTestVisible="False"
+                                   Opacity="0.01" />
 
         <Border Grid.RowSpan="4" Background="#94040A14" Visibility="{Binding IsDialogOpen, Converter={StaticResource BooleanToVisibilityConverter}}" Panel.ZIndex="40">
             <Grid>

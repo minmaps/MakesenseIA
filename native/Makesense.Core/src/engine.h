@@ -53,6 +53,10 @@ private:
         const std::wstring& image_path,
         const std::wstring& model_path,
         const std::wstring& task_name,
+        const std::wstring& backend_name,
+        const std::wstring& provider_name,
+        const std::wstring& status_message,
+        ms_result_code result_code,
         std::vector<native_inference_suggestion> suggestions);
     static std::vector<std::wstring> split_lines(const std::wstring& blob);
 
@@ -82,6 +86,10 @@ private:
     std::wstring latest_inference_active_image_;
     std::wstring latest_inference_model_path_;
     std::wstring latest_inference_task_name_;
+    std::wstring latest_inference_backend_name_;
+    std::wstring latest_inference_provider_name_;
+    std::wstring latest_inference_status_message_;
+    ms_result_code latest_inference_result_code_{MS_RESULT_NOT_FOUND};
     std::vector<native_inference_suggestion> latest_inference_suggestions_;
 
     budgeted_lru ram_cache_;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Xml.Linq;
+using System.IO.Compression;
 using Makesense.Formats.Contracts;
 using Makesense.Formats.Project;
 
@@ -36,7 +37,9 @@ public sealed class AnnotationImportService
         foreach (var imageElement in root.GetProperty("images").EnumerateArray())
         {
             var fileName = imageElement.GetProperty("file_name").GetString() ?? string.Empty;
-            if (imagesByName.TryGetValue(fileName, out var image))
+            var normalizedFileName = Path.GetFileName(fileName);
+            if (imagesByName.TryGetValue(fileName, out var image) ||
+                imagesByName.TryGetValue(normalizedFileName, out image))
             {
                 imageIdMap[imageElement.GetProperty("id").GetInt32()] = image.Id;
             }
@@ -130,18 +133,23 @@ public sealed class AnnotationImportService
 
     private static ProjectState ImportVoc(ProjectState state, IReadOnlyList<string> inputPaths)
     {
+        using var extracted = TryExtractArchive(inputPaths, ".xml");
+        var resolvedPaths = extracted?.Paths ?? inputPaths;
         var labels = state.Labels.ToDictionary(label => label.Name, StringComparer.OrdinalIgnoreCase);
         var imagesByName = state.Images.ToDictionary(image => image.FileName, StringComparer.OrdinalIgnoreCase);
         var imageAnnotations = state.Images.ToDictionary(
             image => image.Id,
             image => image.Annotations.Where(annotation => annotation.Kind != AnnotationKind.Rect).ToList());
 
-        foreach (var path in inputPaths)
+        foreach (var path in resolvedPaths)
         {
             var document = XDocument.Load(path);
             var annotation = document.Element("annotation");
             var fileName = annotation?.Element("filename")?.Value;
-            if (string.IsNullOrWhiteSpace(fileName) || !imagesByName.TryGetValue(fileName, out var image))
+            var normalizedFileName = string.IsNullOrWhiteSpace(fileName) ? string.Empty : Path.GetFileName(fileName);
+            if (string.IsNullOrWhiteSpace(fileName) ||
+                (!imagesByName.TryGetValue(fileName, out var image) &&
+                 !imagesByName.TryGetValue(normalizedFileName, out image)))
             {
                 continue;
             }
@@ -191,7 +199,10 @@ public sealed class AnnotationImportService
 
     private static ProjectState ImportYolo(ProjectState state, IReadOnlyList<string> inputPaths)
     {
-        var labelFile = inputPaths.FirstOrDefault(path => string.Equals(Path.GetFileName(path), "labels.txt", StringComparison.OrdinalIgnoreCase));
+        using var extracted = TryExtractArchive(inputPaths, ".txt");
+        var resolvedPaths = extracted?.Paths ?? inputPaths;
+
+        var labelFile = resolvedPaths.FirstOrDefault(path => string.Equals(Path.GetFileName(path), "labels.txt", StringComparison.OrdinalIgnoreCase));
         if (labelFile is null)
         {
             throw new InvalidOperationException("YOLO import requires labels.txt.");
@@ -223,7 +234,7 @@ public sealed class AnnotationImportService
             image => image.Id,
             image => image.Annotations.Where(annotation => annotation.Kind != AnnotationKind.Rect).ToList());
 
-        foreach (var path in inputPaths.Where(path => !string.Equals(path, labelFile, StringComparison.OrdinalIgnoreCase)))
+        foreach (var path in resolvedPaths.Where(path => !string.Equals(path, labelFile, StringComparison.OrdinalIgnoreCase)))
         {
             var stem = Path.GetFileNameWithoutExtension(path);
             if (!imagesByStem.TryGetValue(stem, out var image) || image.PixelSize is null)
@@ -273,5 +284,45 @@ public sealed class AnnotationImportService
         return double.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var result)
             ? result
             : 0.0;
+    }
+
+    private static ExtractedArchiveScope? TryExtractArchive(IReadOnlyList<string> inputPaths, string expectedExtension)
+    {
+        if (inputPaths.Count != 1 || !string.Equals(Path.GetExtension(inputPaths[0]), ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var extractionRoot = Path.Combine(Path.GetTempPath(), "makesense-import", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(extractionRoot);
+        ZipFile.ExtractToDirectory(inputPaths[0], extractionRoot);
+        var extractedPaths = Directory.GetFiles(extractionRoot, $"*{expectedExtension}", SearchOption.AllDirectories);
+        if (extractedPaths.Length == 0)
+        {
+            throw new InvalidOperationException($"Archive {Path.GetFileName(inputPaths[0])} does not contain any {expectedExtension} files.");
+        }
+
+        return new ExtractedArchiveScope(extractionRoot, extractedPaths);
+    }
+
+    private sealed class ExtractedArchiveScope : IDisposable
+    {
+        public ExtractedArchiveScope(string rootPath, IReadOnlyList<string> paths)
+        {
+            RootPath = rootPath;
+            Paths = paths;
+        }
+
+        public string RootPath { get; }
+
+        public IReadOnlyList<string> Paths { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(RootPath))
+            {
+                Directory.Delete(RootPath, true);
+            }
+        }
     }
 }

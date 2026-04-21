@@ -1,0 +1,6 @@
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\App.baml
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\MainWindow.g.cs
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\App.g.cs
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\GeneratedInternalTypeHelper.g.cs
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\Makesense.Desktop_MarkupCompile.cache
+C:\Users\RAIDABLE\Desktop\MakesenseIA\native\Makesense.Desktop\obj-updated2\desktop\Makesense.Desktop_MarkupCompile.lref

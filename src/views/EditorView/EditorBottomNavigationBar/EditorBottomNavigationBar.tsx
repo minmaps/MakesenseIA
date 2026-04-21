@@ -51,7 +51,7 @@ const EditorBottomNavigationBar: React.FC<IProps> = ({size, imageData, totalImag
                 image={"ico/right.png"}
                 imageAlt={"next"}
                 buttonSize={{width: 25, height: 25}}
-                onClick={() => ImageActions.getNextImage()}
+                onClick={() => ImageActions.validateActiveImageAndGetNextImage()}
                 isDisabled={activeImageIndex === totalImageCount - 1}
                 externalClassName={"right"}
             />

@@ -12,6 +12,7 @@ public sealed class NativeRenderHost : HwndHost
 {
     private readonly DispatcherTimer _renderTimer;
     private nint _hostHandle;
+    private NativeEngineSession? _session;
 
     public NativeRenderHost()
     {
@@ -23,7 +24,20 @@ public sealed class NativeRenderHost : HwndHost
         _renderTimer.Tick += (_, _) => Session?.Render((int)Math.Max(ActualWidth, 1), (int)Math.Max(ActualHeight, 1));
     }
 
-    public NativeEngineSession? Session { get; set; }
+    public NativeEngineSession? Session
+    {
+        get => _session;
+        set
+        {
+            if (ReferenceEquals(_session, value))
+            {
+                return;
+            }
+
+            _session = value;
+            EnsureSessionAttached();
+        }
+    }
 
     protected override HandleRef BuildWindowCore(HandleRef hwndParent)
     {
@@ -41,7 +55,7 @@ public sealed class NativeRenderHost : HwndHost
             nint.Zero,
             nint.Zero);
 
-        Session?.Attach(_hostHandle, (int)Math.Max(ActualWidth, 1), (int)Math.Max(ActualHeight, 1), DefaultConfig());
+        EnsureSessionAttached();
         _renderTimer.Start();
         return new HandleRef(this, _hostHandle);
     }
@@ -85,6 +99,16 @@ public sealed class NativeRenderHost : HwndHost
         {
             Win32.MoveWindow(_hostHandle, 0, 0, Math.Max((int)rcBoundingBox.Width, 1), Math.Max((int)rcBoundingBox.Height, 1), true);
         }
+    }
+
+    private void EnsureSessionAttached()
+    {
+        if (_hostHandle == nint.Zero || _session is null || _session.IsAttached)
+        {
+            return;
+        }
+
+        _session.Attach(_hostHandle, (int)Math.Max(ActualWidth, 1), (int)Math.Max(ActualHeight, 1), DefaultConfig());
     }
 
     private static PerformanceConfig DefaultConfig()

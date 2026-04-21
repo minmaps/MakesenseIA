@@ -19,6 +19,8 @@ import { NotificationsDataMap } from '../../../data/info/NotificationsData';
 import { DocumentParsingError } from '../../../logic/import/voc/VOCImporter';
 import { Notification } from '../../../data/enums/Notification';
 import {LabelNamesNotUniqueError} from '../../../logic/import/yolo/YOLOErrors';
+import { ContextManager } from '../../../logic/context/ContextManager';
+import { ContextType } from '../../../data/enums/ContextType';
 
 interface IProps {
     activeLabelType: LabelType,
@@ -96,11 +98,13 @@ const ImportLabelPopup: React.FC<IProps> = (
             updateLabelNamesAction(loadedLabelNames);
             updateActiveLabelTypeAction(type);
             PopupActions.close();
+            ContextManager.switchCtx(ContextType.EDITOR);
         }
     };
 
     const onReject = (_: LabelType) => {
         PopupActions.close();
+        ContextManager.switchCtx(ContextType.EDITOR);
     };
 
     const onAnnotationFormatChange = (format: AnnotationFormatType) => {

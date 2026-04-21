@@ -26,15 +26,23 @@ export class ImageActions {
     ImageActions.getImageByIndex(currentImageIndex - 1);
   }
 
-  public static getNextImage(): void {
-    const currentImageIndex: number = LabelsSelector.getActiveImageIndex();
+  public static validateActiveImage(): void {
     const currentImageData: ImageData | null = LabelsSelector.getActiveImageData();
 
     if (currentImageData) {
       AIActions.acceptAllSuggestedLabels(currentImageData);
     }
+  }
+
+  public static getNextImage(): void {
+    const currentImageIndex: number = LabelsSelector.getActiveImageIndex();
+    ImageActions.validateActiveImage();
 
     ImageActions.getImageByIndex(currentImageIndex + 1);
+  }
+
+  public static validateActiveImageAndGetNextImage(): void {
+    ImageActions.getNextImage();
   }
 
   public static getImageByIndex(index: number): void {

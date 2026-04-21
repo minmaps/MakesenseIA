@@ -26,6 +26,16 @@ public enum MsInferenceSuggestionKind : uint
     Point = 1
 }
 
+public enum MsInferenceResultCode
+{
+    Ok = 0,
+    Error = 1,
+    InvalidArgument = 2,
+    NotSupported = 3,
+    ResourceLimit = 4,
+    NotFound = 5
+}
+
 internal enum MsResultCode
 {
     Ok = 0,
@@ -106,8 +116,18 @@ internal struct MsInferenceResultSummary
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
     public string TaskName;
 
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string BackendName;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+    public string ProviderName;
+
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string StatusMessage;
+
     public uint SuggestionCount;
     public ulong Generation;
+    public MsInferenceResultCode ResultCode;
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

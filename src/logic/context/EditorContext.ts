@@ -51,7 +51,7 @@ export class EditorContext extends BaseContext {
             keyCombo: ["ArrowRight"],
             action: (event: KeyboardEvent) => {
                 event.preventDefault();
-                ImageActions.getNextImage();
+                ImageActions.validateActiveImageAndGetNextImage();
             }
         },
         {

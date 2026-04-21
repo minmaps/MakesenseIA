@@ -26,11 +26,12 @@ interface IProps {
 }
 
 interface IState {
-    image: HTMLImageElement;
+    image: HTMLImageElement | null;
 }
 
 class ImagePreview extends React.Component<IProps, IState> {
     private isLoading: boolean = false;
+    private isMountedFlag: boolean = false;
 
     constructor(props) {
         super(props);
@@ -41,21 +42,26 @@ class ImagePreview extends React.Component<IProps, IState> {
     }
 
     public componentDidMount(): void {
-        ImageLoadManager.addAndRun(this.loadImage(this.props.imageData, this.props.isScrolling));
+        this.isMountedFlag = true;
+        this.enqueueImageLoad(this.props.imageData, this.props.isScrolling);
     }
 
-    public componentWillUpdate(nextProps: Readonly<IProps>, nextState: Readonly<IState>, nextContext: any): void {
-        if (this.props.imageData.id !== nextProps.imageData.id) {
-            if (nextProps.imageData.loadStatus) {
-                ImageLoadManager.addAndRun(this.loadImage(nextProps.imageData, nextProps.isScrolling));
+    public componentWillUnmount(): void {
+        this.isMountedFlag = false;
+    }
+
+    public componentDidUpdate(prevProps: Readonly<IProps>): void {
+        if (prevProps.imageData.id !== this.props.imageData.id) {
+            if (this.props.imageData.loadStatus || !this.props.isScrolling) {
+                this.enqueueImageLoad(this.props.imageData, this.props.isScrolling);
             }
             else {
                 this.setState({ image: null });
             }
         }
 
-        if (this.props.isScrolling && !nextProps.isScrolling) {
-            ImageLoadManager.addAndRun(this.loadImage(nextProps.imageData, false));
+        if (prevProps.isScrolling && !this.props.isScrolling) {
+            this.enqueueImageLoad(this.props.imageData, false);
         }
     }
 
@@ -64,38 +70,61 @@ class ImagePreview extends React.Component<IProps, IState> {
             this.props.imageData.id !== nextProps.imageData.id ||
             this.state.image !== nextState.image ||
             this.props.isSelected !== nextProps.isSelected ||
-            this.props.isChecked !== nextProps.isChecked
+            this.props.isChecked !== nextProps.isChecked ||
+            this.props.isScrolling !== nextProps.isScrolling
         )
     }
 
+    private enqueueImageLoad = (imageData: ImageData, isScrolling: boolean) => {
+        ImageLoadManager.addAndRun(() => this.loadImage(imageData, isScrolling));
+    };
+
     private loadImage = async (imageData: ImageData, isScrolling: boolean) => {
-        if (imageData.loadStatus) {
-            const image = ImageRepository.getById(imageData.id);
-            if (this.state.image !== image) {
-                this.setState({ image });
+        const cachedImage = ImageRepository.getById(imageData.id);
+        if (cachedImage) {
+            if (this.state.image !== cachedImage && this.isMountedFlag && imageData.id === this.props.imageData.id) {
+                this.setState({ image: cachedImage });
             }
+            return;
         }
-        else if (!isScrolling || !this.isLoading) {
-            this.isLoading = true;
-            const saveLoadedImagePartial = (image: HTMLImageElement) => this.saveLoadedImage(image, imageData);
-            FileUtil.loadImage(imageData.fileData)
-                .then((image: HTMLImageElement) => saveLoadedImagePartial(image))
-                .catch((error) => this.handleLoadImageError())
+
+        if (imageData.loadStatus || isScrolling) {
+            if (!imageData.loadStatus && imageData.id === this.props.imageData.id && this.state.image !== null) {
+                this.setState({ image: null });
+            }
+            return;
+        }
+
+        this.isLoading = true;
+        try {
+            const image = await FileUtil.loadImage(imageData.fileData);
+            this.saveLoadedImage(image, imageData);
+        } catch (error) {
+            this.handleLoadImageError();
+        } finally {
+            this.isLoading = false;
         }
     };
 
     private saveLoadedImage = (image: HTMLImageElement, imageData: ImageData) => {
-        imageData.loadStatus = true;
-        this.props.updateImageDataById(imageData.id, imageData);
+        const nextImageData: ImageData = {
+            ...imageData,
+            loadStatus: true
+        };
+
+        this.props.updateImageDataById(imageData.id, nextImageData);
         ImageRepository.storeImage(imageData.id, image);
-        if (imageData.id === this.props.imageData.id) {
+        if (imageData.id === this.props.imageData.id && this.isMountedFlag) {
             this.setState({ image });
-            this.isLoading = false;
         }
     };
 
     private getStyle = () => {
         const { size } = this.props;
+
+        if (!this.state.image) {
+            return {};
+        }
 
         const containerRect: IRect = {
             x: 0.15 * size.width,

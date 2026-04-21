@@ -164,4 +164,146 @@ public sealed class AnnotationFormatRoundTripTests
             }
         }
     }
+
+    [Fact]
+    public void YoloExporter_OutputZip_CanBeImportedBack()
+    {
+        var label = new LabelClass
+        {
+            Id = "label-1",
+            Name = "car"
+        };
+
+        var source = new ProjectState
+        {
+            Name = "sample",
+            ProjectKind = ProjectKind.ObjectDetection,
+            Labels = [label],
+            Images =
+            [
+                new ImageRecord
+                {
+                    Id = "img-1",
+                    Path = @"C:\images\image-a.png",
+                    FileName = "image-a.png",
+                    FileSizeBytes = 12,
+                    PixelSize = new Size2D(1000, 500),
+                    Annotations =
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = "ann-1",
+                            Kind = AnnotationKind.Rect,
+                            LabelId = label.Id,
+                            Rect = new RectD(400, 150, 200, 200)
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var target = source with
+        {
+            Labels = Array.Empty<LabelClass>(),
+            Images = source.Images.Select(image => image with { Annotations = Array.Empty<AnnotationRecord>() }).ToArray()
+        };
+
+        var zipPath = Path.ChangeExtension(Path.GetTempFileName(), ".zip");
+        File.Delete(zipPath);
+
+        try
+        {
+            var exporter = new AnnotationExportService();
+            exporter.Export(source, AnnotationFormat.Yolo, zipPath);
+
+            var importer = new AnnotationImportService();
+            var imported = importer.Import(target, AnnotationFormat.Yolo, [zipPath]);
+            var rect = Assert.Single(imported.Images[0].Annotations);
+
+            Assert.Single(imported.Labels);
+            Assert.Equal(AnnotationKind.Rect, rect.Kind);
+            Assert.Equal(400, rect.Rect!.Value.X, 3);
+            Assert.Equal(150, rect.Rect!.Value.Y, 3);
+            Assert.Equal(200, rect.Rect!.Value.Width, 3);
+            Assert.Equal(200, rect.Rect!.Value.Height, 3);
+        }
+        finally
+        {
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
+    public void VocExporter_OutputZip_CanBeImportedBack()
+    {
+        var label = new LabelClass
+        {
+            Id = "label-1",
+            Name = "person"
+        };
+
+        var source = new ProjectState
+        {
+            Name = "sample",
+            ProjectKind = ProjectKind.ObjectDetection,
+            Labels = [label],
+            Images =
+            [
+                new ImageRecord
+                {
+                    Id = "img-1",
+                    Path = @"C:\images\image-a.png",
+                    FileName = "image-a.png",
+                    FileSizeBytes = 12,
+                    PixelSize = new Size2D(800, 600),
+                    Annotations =
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = "ann-1",
+                            Kind = AnnotationKind.Rect,
+                            LabelId = label.Id,
+                            Rect = new RectD(10, 20, 30, 40)
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var target = source with
+        {
+            Labels = Array.Empty<LabelClass>(),
+            Images = source.Images.Select(image => image with { Annotations = Array.Empty<AnnotationRecord>() }).ToArray()
+        };
+
+        var zipPath = Path.ChangeExtension(Path.GetTempFileName(), ".zip");
+        File.Delete(zipPath);
+
+        try
+        {
+            var exporter = new AnnotationExportService();
+            exporter.Export(source, AnnotationFormat.Voc, zipPath);
+
+            var importer = new AnnotationImportService();
+            var imported = importer.Import(target, AnnotationFormat.Voc, [zipPath]);
+            var rect = Assert.Single(imported.Images[0].Annotations);
+
+            Assert.Single(imported.Labels);
+            Assert.Equal(AnnotationKind.Rect, rect.Kind);
+            Assert.Equal(10, rect.Rect!.Value.X, 3);
+            Assert.Equal(20, rect.Rect!.Value.Y, 3);
+            Assert.Equal(30, rect.Rect!.Value.Width, 3);
+            Assert.Equal(40, rect.Rect!.Value.Height, 3);
+        }
+        finally
+        {
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
 }

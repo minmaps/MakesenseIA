@@ -645,7 +645,11 @@ namespace
             auto session = get_or_create_session(request, status);
             if (!session)
             {
-                return MS_RESULT_NOT_SUPPORTED;
+                result.backend_name = L"ONNX Runtime";
+                result.provider_name = L"Fallback";
+                result.result_code = MS_RESULT_NOT_SUPPORTED;
+                result.status_message = status;
+                return result.result_code;
             }
 
             preprocessed_image preprocessed;
@@ -677,7 +681,11 @@ namespace
             catch (const Ort::Exception& exception)
             {
                 status = L"ONNX Runtime execution failed: " + widen_utf8(exception.what());
-                return MS_RESULT_ERROR;
+                result.backend_name = L"ONNX Runtime";
+                result.provider_name = session->provider_name;
+                result.result_code = MS_RESULT_ERROR;
+                result.status_message = status;
+                return result.result_code;
             }
 
             std::vector<native_inference_suggestion> suggestions;
@@ -702,11 +710,13 @@ namespace
 
             result.backend_name = L"ONNX Runtime";
             result.provider_name = session->provider_name;
+            result.result_code = MS_RESULT_OK;
             result.suggestions = std::move(suggestions);
-            status = result.suggestions.empty()
+            result.status_message = result.suggestions.empty()
                 ? L"ONNX Runtime completed on " + session->provider_name + L" but produced no supported suggestions."
                 : L"Inference results ready for " + request.task_name + L" using " + session->provider_name + L".";
-            return MS_RESULT_OK;
+            status = result.status_message;
+            return result.result_code;
         }
 
     private:
@@ -756,13 +766,15 @@ namespace
             std::filesystem::file_time_type last_write_time,
             std::wstring& status)
         {
-            const std::array<std::pair<std::wstring, bool>, 2> provider_attempts =
+            const std::array<std::pair<std::wstring, int>, 3> provider_attempts =
             {{
-                {L"TensorRT", true},
-                {L"CUDA", false}
+                {L"TensorRT", 2},
+                {L"CUDA", 1},
+                {L"CPU", 0}
             }};
 
-            for (const auto& [provider_name, use_tensorrt] : provider_attempts)
+            std::wstring failure_details;
+            for (const auto& [provider_name, provider_kind] : provider_attempts)
             {
                 try
                 {
@@ -771,7 +783,7 @@ namespace
                     options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
                     options.SetIntraOpNumThreads(1);
 
-                    if (use_tensorrt)
+                    if (provider_kind == 2)
                     {
                         std::filesystem::create_directories(request.cache_directory);
                         auto cache_path = narrow_utf8(request.cache_directory);
@@ -784,7 +796,7 @@ namespace
                         trt_options.trt_min_subgraph_size = 1;
                         options.AppendExecutionProvider_TensorRT(trt_options);
                     }
-                    else
+                    else if (provider_kind == 1)
                     {
                         OrtCUDAProviderOptions cuda_options{};
                         cuda_options.device_id = 0;
@@ -828,10 +840,14 @@ namespace
                 }
                 catch (const Ort::Exception& exception)
                 {
-                    status = L"Failed to initialize " + provider_name + L" provider: " + widen_utf8(exception.what());
+                    const auto message = L"Failed to initialize " + provider_name + L" provider: " + widen_utf8(exception.what());
+                    failure_details += failure_details.empty() ? message : L" | " + message;
                 }
             }
 
+            status = failure_details.empty()
+                ? L"No ONNX Runtime execution provider could be initialized."
+                : failure_details;
             return nullptr;
         }
 

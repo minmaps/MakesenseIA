@@ -1,4 +1,6 @@
 using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using Makesense.Desktop.Interop;
 using Makesense.Formats.Contracts;
 
@@ -8,8 +10,12 @@ public sealed record NativeInferenceResultSummary(
     string ActiveImagePath,
     string ModelPath,
     string TaskName,
+    string BackendName,
+    string ProviderName,
+    string StatusMessage,
     uint SuggestionCount,
-    ulong Generation);
+    ulong Generation,
+    MsInferenceResultCode ResultCode);
 
 public sealed record NativeInferenceSuggestion(
     string Id,
@@ -27,8 +33,23 @@ public sealed record NativeInferenceSuggestion(
 
 public sealed class NativeEngineSession : IDisposable
 {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetDefaultDllDirectories(uint directoryFlags);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern nint AddDllDirectory(string newDirectory);
+
+    private const uint LoadLibrarySearchDefaultDirs = 0x00001000;
+    private const uint LoadLibrarySearchUserDirs = 0x00000400;
+    private static int _nativeRuntimeConfigured;
+    private readonly object _nativeCallGate = new();
     private nint _engineHandle;
     private bool _disposed;
+
+    static NativeEngineSession()
+    {
+        EnsureNativeRuntimeSearchPathConfigured();
+    }
 
     public event EventHandler<string>? StatusChanged;
 
@@ -159,14 +180,24 @@ public sealed class NativeEngineSession : IDisposable
 
         try
         {
-            var result = NativeMethods.ms_get_latest_inference_summary(_engineHandle, out var summary);
+            MsResultCode result;
+            MsInferenceResultSummary summary;
+            lock (_nativeCallGate)
+            {
+                result = NativeMethods.ms_get_latest_inference_summary(_engineHandle, out summary);
+            }
+
             return result == MsResultCode.Ok
                 ? new NativeInferenceResultSummary(
                     summary.ActiveImagePath ?? string.Empty,
                     summary.ModelPath ?? string.Empty,
                     summary.TaskName ?? string.Empty,
+                    summary.BackendName ?? string.Empty,
+                    summary.ProviderName ?? string.Empty,
+                    summary.StatusMessage ?? string.Empty,
                     summary.SuggestionCount,
-                    summary.Generation)
+                    summary.Generation,
+                    summary.ResultCode)
                 : null;
         }
         catch (DllNotFoundException)
@@ -199,7 +230,13 @@ public sealed class NativeEngineSession : IDisposable
         {
             try
             {
-                var result = NativeMethods.ms_get_latest_inference_suggestion(_engineHandle, index, out var suggestion);
+                MsResultCode result;
+                MsInferenceSuggestion suggestion;
+                lock (_nativeCallGate)
+                {
+                    result = NativeMethods.ms_get_latest_inference_suggestion(_engineHandle, index, out suggestion);
+                }
+
                 if (result != MsResultCode.Ok)
                 {
                     break;
@@ -245,7 +282,10 @@ public sealed class NativeEngineSession : IDisposable
 
         try
         {
-            NativeMethods.ms_shutdown(_engineHandle);
+            lock (_nativeCallGate)
+            {
+                NativeMethods.ms_shutdown(_engineHandle);
+            }
         }
         catch (DllNotFoundException)
         {
@@ -265,6 +305,27 @@ public sealed class NativeEngineSession : IDisposable
 
         Shutdown();
         _disposed = true;
+    }
+
+    private static void EnsureNativeRuntimeSearchPathConfigured()
+    {
+        if (Interlocked.Exchange(ref _nativeRuntimeConfigured, 1) != 0)
+        {
+            return;
+        }
+
+        var baseDirectory = AppContext.BaseDirectory;
+        var assemblyDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        foreach (var candidate in new[] { baseDirectory, assemblyDirectory }.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!File.Exists(Path.Combine(candidate!, "Makesense.Core.dll")))
+            {
+                continue;
+            }
+
+            SetDefaultDllDirectories(LoadLibrarySearchDefaultDirs | LoadLibrarySearchUserDirs);
+            AddDllDirectory(candidate!);
+        }
     }
 
     private void HandleInput(MsInputEvent inputEvent)
@@ -289,7 +350,12 @@ public sealed class NativeEngineSession : IDisposable
     {
         try
         {
-            var result = action();
+            MsResultCode result;
+            lock (_nativeCallGate)
+            {
+                result = action();
+            }
+
             if (result == MsResultCode.Ok)
             {
                 if (!string.IsNullOrWhiteSpace(successStatus))
@@ -339,19 +405,21 @@ public sealed class NativeEngineSession : IDisposable
             return;
         }
 
-        for (var attempt = 0; attempt < 50; attempt++)
+        for (var attempt = 0; attempt < 1200; attempt++)
         {
             var summary = ReadLatestInferenceSummary();
             if (summary is not null &&
-                summary.Generation > previousGeneration &&
                 string.Equals(summary.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(summary.TaskName, taskName, StringComparison.Ordinal))
+                string.Equals(summary.TaskName, taskName, StringComparison.Ordinal) &&
+                (summary.Generation > previousGeneration || summary.ResultCode != MsInferenceResultCode.NotFound))
             {
                 return;
             }
 
-            Thread.Sleep(20);
+            Thread.Sleep(100);
         }
+
+        StatusChanged?.Invoke(this, $"Inference is still running for {Path.GetFileName(modelPath)}. Waiting exceeded 120 seconds.");
     }
 
     private static NativeInferenceSuggestion ToModel(MsInferenceSuggestion suggestion)

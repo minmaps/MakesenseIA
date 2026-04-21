@@ -1,33 +1,47 @@
 export class ImageLoadManager {
 
-	private static queue: (() => Promise<any>)[] = [];
+	private static queue: Array<() => Promise<unknown>> = [];
 	private static isRunning: boolean = false;
+	private static isScheduled: boolean = false;
 
-	public static add(fx: Promise<any>) {
-		ImageLoadManager.queue.push(async () => await fx);
+	public static add(task: () => Promise<unknown>) {
+		ImageLoadManager.queue.push(task);
 	}
 
 	public static run() {
-		setTimeout(() => ImageLoadManager.runQueue(), 10);
+		if (ImageLoadManager.isScheduled) {
+			return;
+		}
+
+		ImageLoadManager.isScheduled = true;
+		setTimeout(() => {
+			ImageLoadManager.isScheduled = false;
+			void ImageLoadManager.runQueue();
+		}, 10);
 	}
 
-	public static addAndRun(fx: Promise<any>) {
-		ImageLoadManager.add(fx);
+	public static addAndRun(task: () => Promise<unknown>) {
+		ImageLoadManager.add(task);
 		ImageLoadManager.run();
 	}
 
 	public static async runQueue() {
 		if (!ImageLoadManager.isRunning) {
 			ImageLoadManager.isRunning = true;
-			await ImageLoadManager.runTasks();
-			ImageLoadManager.isRunning = false;
+			try {
+				await ImageLoadManager.runTasks();
+			} finally {
+				ImageLoadManager.isRunning = false;
+			}
 		}
 	}
 
 	private static async runTasks() {
 		while (ImageLoadManager.queue.length > 0) {
-			const fx = ImageLoadManager.queue.shift();
-			await fx();
+			const task = ImageLoadManager.queue.shift();
+			if (task) {
+				await task();
+			}
 		}
 	}
 }

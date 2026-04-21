@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Globalization;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Threading;
@@ -32,6 +33,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _selectedInferenceTask;
     private string _newLabelName;
     private string _imageSearchQuery;
+    private string _activeInferenceBackend;
+    private string _activeInferenceProvider;
+    private string _activeInferenceRuntime;
     private ImageRecord? _selectedImage;
     private LabelClass? _selectedLabel;
     private AnnotationItemViewModel? _selectedAnnotation;
@@ -58,6 +62,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _polygonPointsText;
     private ModalDialogViewModel? _activeDialog;
     private readonly DispatcherTimer _notificationTimer;
+    private readonly Dispatcher _uiDispatcher;
+    private int _inferenceBatchCompletedImages;
+    private int _inferenceBatchTotalImages;
+    private bool _isInferenceBatchRunning;
 
     public MainWindowViewModel(
         PerformanceConfigService performanceConfigService,
@@ -78,6 +86,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedInferenceTask = "rect-detection";
         _newLabelName = string.Empty;
         _imageSearchQuery = string.Empty;
+        _activeInferenceBackend = "Not run";
+        _activeInferenceProvider = "N/A";
+        _activeInferenceRuntime = "Native inference idle.";
         _selectedAnnotationSuggestedLabel = string.Empty;
         _rectX = string.Empty;
         _rectY = string.Empty;
@@ -94,6 +105,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _selectedImportFormat = AnnotationFormat.Coco;
         _selectedExportFormat = AnnotationFormat.Yolo;
         _selectedImageFilter = ImageFilterMode.All;
+        _uiDispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _notificationTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(1)
@@ -246,6 +258,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string RuntimeSummary => "WPF + HwndHost + C++20 Core + D3D11/Direct2D";
 
     public string RenderHostHint => "Native rendering for viewport, desktop store for project parity and formats.";
+
+    public string ActiveInferenceBackend
+    {
+        get => _activeInferenceBackend;
+        private set => SetProperty(ref _activeInferenceBackend, value);
+    }
+
+    public string ActiveInferenceProvider
+    {
+        get => _activeInferenceProvider;
+        private set => SetProperty(ref _activeInferenceProvider, value);
+    }
+
+    public string ActiveInferenceRuntime
+    {
+        get => _activeInferenceRuntime;
+        private set => SetProperty(ref _activeInferenceRuntime, value);
+    }
+
+    public double InferenceBatchProgressPercent => _inferenceBatchTotalImages == 0
+        ? 0
+        : 100.0 * _inferenceBatchCompletedImages / _inferenceBatchTotalImages;
+
+    public string InferenceBatchProgressLabel => _inferenceBatchTotalImages == 0
+        ? "Idle"
+        : $"{_inferenceBatchCompletedImages}/{_inferenceBatchTotalImages}";
+
+    public bool IsInferenceBatchRunning
+    {
+        get => _isInferenceBatchRunning;
+        private set => SetProperty(ref _isInferenceBatchRunning, value);
+    }
 
     public ModalDialogViewModel? ActiveDialog
     {
@@ -617,6 +661,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         SelectedImage = _projectState.Images.FirstOrDefault(image => image.Id == _projectState.ActiveImageId) ?? _projectState.Images.FirstOrDefault();
         SelectedLabel = _projectState.Labels.FirstOrDefault();
         ActiveModelPath = _projectState.ActiveModel?.Path ?? string.Empty;
+        SelectedInferenceTask = _projectState.ActiveModel?.Task ?? SelectedInferenceTask;
+        ResetInferenceBatchState();
         StatusMessage = $"Loaded manifest with {Images.Count} images and {Labels.Count} labels.";
     }
 
@@ -644,6 +690,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Labels = _projectState.Labels
         });
 
+        ResetInferenceBatchState();
         ProjectPath = "Loose image session";
         EngineSession.OpenImages(dialog.FileNames);
         SelectedImage = Images.FirstOrDefault();
@@ -681,6 +728,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .ToArray();
 
         ReplaceState(_projectState.ReplaceImages(appendedImages));
+        ResetInferenceBatchState();
         EngineSession.OpenImages(appendedImages.Select(image => image.Path));
         StatusMessage = $"{newImagePaths.Length} image(s) added to the current session.";
     }
@@ -708,7 +756,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     Name = Path.GetFileNameWithoutExtension(ActiveModelPath),
                     Path = ActiveModelPath,
-                    Task = SelectedInferenceTask
+                    Task = SelectedInferenceTask,
+                    Backend = ActiveInferenceProvider
                 }
         };
 
@@ -1245,13 +1294,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private string? BrowseModelPath()
     {
+        var initialDirectory = ResolveModelDialogInitialDirectory();
         var dialog = new OpenFileDialog
         {
             Filter = "ONNX Model (*.onnx)|*.onnx",
-            Multiselect = false
+            Multiselect = false,
+            InitialDirectory = initialDirectory
         };
 
         return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    private string ResolveModelDialogInitialDirectory()
+    {
+        var selectedModelDirectory = string.IsNullOrWhiteSpace(ActiveModelPath)
+            ? null
+            : Path.GetDirectoryName(ActiveModelPath);
+        if (!string.IsNullOrWhiteSpace(selectedModelDirectory) && Directory.Exists(selectedModelDirectory))
+        {
+            return selectedModelDirectory;
+        }
+
+        return AppContext.BaseDirectory;
     }
 
     private string[]? BrowseImportPaths(AnnotationFormat format)
@@ -1262,8 +1326,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Filter = format switch
             {
                 AnnotationFormat.Coco => "COCO JSON (*.json)|*.json",
-                AnnotationFormat.Yolo => "YOLO files (*.txt)|*.txt|All Files (*.*)|*.*",
-                AnnotationFormat.Voc => "VOC XML (*.xml)|*.xml|All Files (*.*)|*.*",
+                AnnotationFormat.Yolo => "YOLO package (*.zip)|*.zip|YOLO files (*.txt)|*.txt|All Files (*.*)|*.*",
+                AnnotationFormat.Voc => "VOC package (*.zip)|*.zip|VOC XML (*.xml)|*.xml|All Files (*.*)|*.*",
                 _ => "All Files (*.*)|*.*"
             }
         };
@@ -1338,16 +1402,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool ConfirmRunInference(InferenceSetupDialogViewModel dialog)
     {
+        if (IsInferenceBatchRunning)
+        {
+            StatusMessage = "Inference is already running on the current dataset.";
+            return false;
+        }
+
         if (!File.Exists(dialog.ModelPath))
         {
             StatusMessage = "Select a valid ONNX model file before running inference.";
             return false;
         }
 
+        if (_projectState.Images.Count == 0)
+        {
+            StatusMessage = "Load at least one image before running inference.";
+            return false;
+        }
+
         ActiveModelPath = dialog.ModelPath;
         SelectedInferenceTask = dialog.SelectedInferenceTask;
-        EngineSession.RunInference(ActiveModelPath, SelectedInferenceTask);
-        ApplyNativeInferenceSuggestions();
+        ResetInferenceBatchState(_projectState.Images.Count);
+        _ = RunInferenceBatchAsync(ActiveModelPath, SelectedInferenceTask, _projectState.Images.ToArray());
         return true;
     }
 
@@ -1547,7 +1623,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OnSessionStatusChanged(object? sender, string status)
     {
-        StatusMessage = status;
+        if (_uiDispatcher.CheckAccess())
+        {
+            StatusMessage = status;
+            return;
+        }
+
+        _ = _uiDispatcher.BeginInvoke(() => StatusMessage = status);
     }
 
     private void OnNotificationTimerTick(object? sender, EventArgs e)
@@ -1635,6 +1717,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplySelectedImage(ImageRecord? value, bool updateProjectState, bool updateNativeEngine)
     {
+        var previousImage = _selectedImage;
         if (!SetProperty(ref _selectedImage, value, nameof(SelectedImage)))
         {
             if (updateProjectState && _projectState.ActiveImageId != value?.Id)
@@ -1667,8 +1750,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (updateNativeEngine)
         {
-            EngineSession.SetActiveImage(value?.Path ?? string.Empty);
-            UpdateViewportTransform(1.0, 0.0, 0.0);
+            var previousPath = previousImage?.Path ?? string.Empty;
+            var nextPath = value?.Path ?? string.Empty;
+            if (!string.Equals(previousPath, nextPath, StringComparison.OrdinalIgnoreCase))
+            {
+                EngineSession.SetActiveImage(nextPath);
+                UpdateViewportTransform(1.0, 0.0, 0.0);
+            }
         }
     }
 
@@ -1769,40 +1857,149 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : string.Empty;
     }
 
-    private void ApplyNativeInferenceSuggestions()
+    private async Task RunInferenceBatchAsync(string modelPath, string taskName, IReadOnlyList<ImageRecord> images)
     {
-        if (SelectedImage is null)
+        IsInferenceBatchRunning = true;
+        RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+        RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+
+        try
         {
-            StatusMessage = $"Inference requested for {Path.GetFileName(ActiveModelPath)}.";
+            var originalSelectedImagePath = SelectedImage?.Path ?? string.Empty;
+            for (var index = 0; index < images.Count; index++)
+            {
+                var image = images[index];
+                await RunInferenceForImageAsync(modelPath, taskName, image.Path);
+                _inferenceBatchCompletedImages = index + 1;
+                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+            }
+
+            await _uiDispatcher.InvokeAsync(() =>
+            {
+                if (!string.IsNullOrWhiteSpace(originalSelectedImagePath))
+                {
+                    EngineSession.SetActiveImage(originalSelectedImagePath);
+                }
+
+                var imagesWithSuggestions = SuggestionImageCount;
+                StatusMessage = $"Batch inference completed. {imagesWithSuggestions} image(s) now contain suggestions.";
+            });
+        }
+        finally
+        {
+            await _uiDispatcher.InvokeAsync(() =>
+            {
+                IsInferenceBatchRunning = false;
+                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+            });
+        }
+    }
+
+    private async Task RunInferenceForImageAsync(string modelPath, string taskName, string imagePath)
+    {
+        try
+        {
+            await Task.Run(() =>
+            {
+                EngineSession.SetActiveImage(imagePath);
+                EngineSession.RunInference(modelPath, taskName);
+            });
+            await _uiDispatcher.InvokeAsync(() =>
+            {
+                ApplyNativeInferenceSuggestions(modelPath, taskName, imagePath);
+                var selectedImagePath = SelectedImage?.Path ?? string.Empty;
+                if (!string.Equals(selectedImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    EngineSession.SetActiveImage(selectedImagePath);
+                }
+            });
+        }
+        catch (Exception exception)
+        {
+            await _uiDispatcher.InvokeAsync(() => StatusMessage = exception.Message);
+        }
+    }
+
+    private void ApplyNativeInferenceSuggestions(string modelPath, string taskName, string imagePath)
+    {
+        var summary = EngineSession.ReadLatestInferenceSummary();
+        UpdateInferenceRuntime(summary);
+        if (summary is null ||
+            !string.Equals(summary.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(summary.TaskName, taskName, StringComparison.Ordinal) ||
+            !string.Equals(summary.ActiveImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
+        {
+            StatusMessage = $"Inference requested for {Path.GetFileName(modelPath)} on {Path.GetFileName(imagePath)}. No native result available.";
             return;
         }
 
-        var summary = EngineSession.ReadLatestInferenceSummary();
         var suggestions = EngineSession.ReadLatestInferenceSuggestions();
-        if (summary is null || !string.Equals(summary.ActiveImagePath, SelectedImage.Path, StringComparison.OrdinalIgnoreCase))
+        var targetImage = _projectState.Images.FirstOrDefault(image => string.Equals(image.Path, summary.ActiveImagePath, StringComparison.OrdinalIgnoreCase));
+        if (targetImage is null)
         {
-            StatusMessage = $"Inference requested for {Path.GetFileName(ActiveModelPath)}. No native result available.";
+            StatusMessage = $"Inference completed for {Path.GetFileName(modelPath)}, but the target image is no longer loaded in the project.";
+            return;
+        }
+
+        if (summary.ResultCode != MsInferenceResultCode.Ok)
+        {
+            StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
+                ? $"Inference failed on {summary.ProviderName}."
+                : summary.StatusMessage;
             return;
         }
 
         if (suggestions.Count == 0)
         {
-            StatusMessage = $"Inference requested for {Path.GetFileName(ActiveModelPath)}. Native runtime returned no suggestions.";
+            StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
+                ? $"Inference completed on {summary.ProviderName} with no supported suggestions."
+                : summary.StatusMessage;
             return;
         }
 
-        var updatedImage = SelectedImage with
+        var updatedImage = targetImage with
         {
-            Annotations = SelectedImage.Annotations
+            Annotations = targetImage.Annotations
                 .Where(annotation => string.IsNullOrWhiteSpace(annotation.SuggestedLabel))
                 .Concat(suggestions.Select(ConvertNativeSuggestion))
                 .ToArray()
         };
 
         ReplaceImage(updatedImage);
-        SelectedImage = updatedImage;
-        SelectedAnnotation = Annotations.FirstOrDefault(annotation => !string.IsNullOrWhiteSpace(annotation.Record.SuggestedLabel));
-        StatusMessage = $"Inference requested for {Path.GetFileName(ActiveModelPath)}. {suggestions.Count} native suggestion(s) loaded.";
+        if (SelectedImage?.Id == updatedImage.Id)
+        {
+            SelectedAnnotation = Annotations.FirstOrDefault(annotation => !string.IsNullOrWhiteSpace(annotation.Record.SuggestedLabel));
+        }
+
+        StatusMessage = $"{suggestions.Count} native suggestion(s) loaded for {Path.GetFileName(summary.ActiveImagePath)} via {summary.ProviderName}.";
+    }
+
+    private void ResetInferenceBatchState(int totalImages = 0)
+    {
+        _inferenceBatchCompletedImages = 0;
+        _inferenceBatchTotalImages = totalImages;
+        IsInferenceBatchRunning = false;
+        RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+        RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+    }
+
+    private void UpdateInferenceRuntime(NativeInferenceResultSummary? summary)
+    {
+        if (summary is null)
+        {
+            ActiveInferenceBackend = "Not run";
+            ActiveInferenceProvider = "N/A";
+            ActiveInferenceRuntime = "Native inference idle.";
+            return;
+        }
+
+        ActiveInferenceBackend = string.IsNullOrWhiteSpace(summary.BackendName) ? "Unavailable" : summary.BackendName;
+        ActiveInferenceProvider = string.IsNullOrWhiteSpace(summary.ProviderName) ? "N/A" : summary.ProviderName;
+        ActiveInferenceRuntime = string.IsNullOrWhiteSpace(summary.StatusMessage)
+            ? $"Backend {ActiveInferenceBackend} via {ActiveInferenceProvider}."
+            : summary.StatusMessage;
     }
 
     private static AnnotationRecord ConvertNativeSuggestion(NativeInferenceSuggestion suggestion)

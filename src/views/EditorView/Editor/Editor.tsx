@@ -68,7 +68,7 @@ class Editor extends React.Component<IProps, IState> {
 
         ContextManager.switchCtx(ContextType.EDITOR);
         EditorActions.mountRenderEnginesAndHelpers(activeLabelType);
-        ImageLoadManager.addAndRun(this.loadImage(imageData));
+        this.enqueueImageLoad(imageData);
         ViewPortActions.resizeCanvas(this.props.size);
     }
 
@@ -79,11 +79,16 @@ class Editor extends React.Component<IProps, IState> {
     public componentDidUpdate(prevProps: Readonly<IProps>, prevState: Readonly<{}>, snapshot?: any): void {
         const {imageData, activeLabelType} = this.props;
 
-        prevProps.imageData.id !== imageData.id && ImageLoadManager.addAndRun(this.loadImage(imageData));
+        if (prevProps.imageData.id !== imageData.id) {
+            this.enqueueImageLoad(imageData);
+        }
 
         if (prevProps.activeLabelType !== activeLabelType) {
             EditorActions.swapSupportRenderingEngine(activeLabelType);
-            AIActions.detect(imageData.id, ImageRepository.getById(imageData.id));
+            const activeImage = ImageRepository.getById(imageData.id);
+            if (activeImage) {
+                AIActions.detect(imageData.id, activeImage);
+            }
         }
 
         this.updateModelAndRender();
@@ -111,31 +116,48 @@ class Editor extends React.Component<IProps, IState> {
     // LOAD IMAGE
     // =================================================================================================================
 
+    private enqueueImageLoad = (imageData: ImageData) => {
+        ImageLoadManager.addAndRun(() => this.loadImage(imageData));
+    };
+
     private loadImage = async (imageData: ImageData): Promise<any> => {
-        if (imageData.loadStatus) {
-            EditorActions.setActiveImage(ImageRepository.getById(imageData.id));
-            AIActions.detect(imageData.id, ImageRepository.getById(imageData.id));
-            this.updateModelAndRender()
+        const cachedImage = ImageRepository.getById(imageData.id);
+        if (cachedImage) {
+            if (imageData.id === this.props.imageData.id) {
+                EditorActions.setActiveImage(cachedImage);
+                AIActions.detect(imageData.id, cachedImage);
+                EditorActions.setLoadingStatus(false);
+                this.updateModelAndRender();
+            }
+            return;
         }
-        else {
-            if (!EditorModel.isLoading) {
-                EditorActions.setLoadingStatus(true);
-                const saveLoadedImagePartial = (image: HTMLImageElement) => this.saveLoadedImage(image, imageData);
-                FileUtil.loadImage(imageData.fileData)
-                    .then((image:HTMLImageElement) => saveLoadedImagePartial(image))
-                    .catch((error) => this.handleLoadImageError())
+
+        EditorActions.setLoadingStatus(true);
+        try {
+            const image = await FileUtil.loadImage(imageData.fileData);
+            this.saveLoadedImage(image, imageData);
+        } catch (error) {
+            this.handleLoadImageError();
+        } finally {
+            if (imageData.id === this.props.imageData.id) {
+                EditorActions.setLoadingStatus(false);
             }
         }
     };
 
     private saveLoadedImage = (image: HTMLImageElement, imageData: ImageData) => {
-        imageData.loadStatus = true;
-        this.props.updateImageDataById(imageData.id, imageData);
+        const nextImageData: ImageData = {
+            ...imageData,
+            loadStatus: true
+        };
+
+        this.props.updateImageDataById(imageData.id, nextImageData);
         ImageRepository.storeImage(imageData.id, image);
-        EditorActions.setActiveImage(image);
-        AIActions.detect(imageData.id, image);
-        EditorActions.setLoadingStatus(false);
-        this.updateModelAndRender()
+        if (imageData.id === this.props.imageData.id) {
+            EditorActions.setActiveImage(image);
+            AIActions.detect(imageData.id, image);
+            this.updateModelAndRender();
+        }
     };
 
     private handleLoadImageError = () => {};

@@ -144,10 +144,11 @@ class ImagesList extends React.Component<IProps, IState> {
 
     private renderImagePreview = (visibleIndex: number, isScrolling: boolean, isVisible: boolean, style: React.CSSProperties) => {
         const imageIndex = this.getVisibleImageIndexes()[visibleIndex];
+        const previewSize = this.getPreviewSize();
         return <ImagePreview
             key={imageIndex}
             style={style}
-            size={{width: 150, height: 150}}
+            size={previewSize}
             isScrolling={isScrolling}
             isChecked={this.isImageChecked(imageIndex)}
             imageData={this.props.imagesData[imageIndex]}
@@ -156,11 +157,27 @@ class ImagesList extends React.Component<IProps, IState> {
         />
     };
 
+    private getPreviewSize = (): ISize => {
+        const {size} = this.state;
+
+        if (!size) {
+            return {width: 150, height: 150};
+        }
+
+        // Keep two readable columns in the images sidebar while avoiding a fallback to a single column.
+        const previewWidth = Math.max(140, Math.min(180, Math.floor((size.width - 12) / 2)));
+        return {
+            width: previewWidth,
+            height: previewWidth
+        };
+    };
+
     public render() {
         const { size } = this.state;
         const detectedImageIndexes = this.getDetectedImageIndexes();
         const imagesWithPendingDetectionsCount = this.getImagesWithPendingDetectionsCount();
         const visibleImageIndexes = this.getVisibleImageIndexes();
+        const previewSize = this.getPreviewSize();
         return(
             <div
                 className="ImagesList"
@@ -185,7 +202,7 @@ class ImagesList extends React.Component<IProps, IState> {
                 >
                     {!!size && visibleImageIndexes.length > 0 && <VirtualList
                         size={size}
-                        childSize={{width: 150, height: 150}}
+                        childSize={previewSize}
                         childCount={visibleImageIndexes.length}
                         childRender={this.renderImagePreview}
                         overScanHeight={200}

@@ -97,8 +97,12 @@ struct ms_inference_result_summary
     wchar_t active_image_path[260];
     wchar_t model_path[260];
     wchar_t task_name[64];
+    wchar_t backend_name[64];
+    wchar_t provider_name[64];
+    wchar_t status_message[256];
     std::uint32_t suggestion_count;
     std::uint64_t generation;
+    ms_result_code result_code;
 };
 
 struct ms_inference_suggestion

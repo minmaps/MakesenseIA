@@ -7,12 +7,13 @@ interface IProps {
     direction: Direction
     isOpen: boolean;
     isWithContext?: boolean;
+    contentWidth?: number;
     renderCompanion?: () => any;
     renderContent?: () => any;
 }
 
 export const SideNavigationBar: React.FC<IProps> = (props) => {
-    const {direction, isOpen, isWithContext, renderContent, renderCompanion} = props;
+    const {direction, isOpen, isWithContext, renderContent, renderCompanion, contentWidth} = props;
 
     const getClassName = () => {
         return classNames(
@@ -26,12 +27,20 @@ export const SideNavigationBar: React.FC<IProps> = (props) => {
         );
     };
 
+    const navigationBarContentStyle = contentWidth ? {
+        minWidth: contentWidth,
+        width: contentWidth
+    } : undefined;
+
     return (
         <div className={getClassName()}>
             <div className="CompanionBar">
                 {renderCompanion && renderCompanion()}
             </div>
-            {isOpen && <div className="NavigationBarContentWrapper">
+            {isOpen && <div
+                className="NavigationBarContentWrapper"
+                style={navigationBarContentStyle}
+            >
                 {renderContent && renderContent()}
             </div>}
         </div>

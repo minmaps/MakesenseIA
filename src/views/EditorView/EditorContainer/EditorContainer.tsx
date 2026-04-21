@@ -35,10 +35,13 @@ const EditorContainer: React.FC<IProps> = (
     }) => {
     const [leftTabStatus, setLeftTabStatus] = useState(true);
     const [rightTabStatus, setRightTabStatus] = useState(true);
+    const leftSideBarContentWidth = 360;
 
     const calculateEditorSize = (): ISize => {
         if (windowSize) {
-            const leftTabWidth = leftTabStatus ? Settings.SIDE_NAVIGATION_BAR_WIDTH_OPEN_PX : Settings.SIDE_NAVIGATION_BAR_WIDTH_CLOSED_PX;
+            const leftTabWidth = leftTabStatus
+                ? Settings.SIDE_NAVIGATION_BAR_WIDTH_CLOSED_PX + leftSideBarContentWidth + 1
+                : Settings.SIDE_NAVIGATION_BAR_WIDTH_CLOSED_PX;
             const rightTabWidth = rightTabStatus ? Settings.SIDE_NAVIGATION_BAR_WIDTH_OPEN_PX : Settings.SIDE_NAVIGATION_BAR_WIDTH_CLOSED_PX;
             return {
                 width: windowSize.width - leftTabWidth - rightTabWidth,
@@ -106,6 +109,7 @@ const EditorContainer: React.FC<IProps> = (
                 direction={Direction.LEFT}
                 isOpen={leftTabStatus}
                 isWithContext={activeContext === ContextType.LEFT_NAVBAR}
+                contentWidth={leftSideBarContentWidth}
                 renderCompanion={leftSideBarCompanionRender}
                 renderContent={leftSideBarRender}
                 key='left-side-navigation-bar'
