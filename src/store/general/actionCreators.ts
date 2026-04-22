@@ -94,3 +94,12 @@ export function updatePerClassColorationStatus(enablePerClassColoration: boolean
         },
     };
 }
+
+export function updateShowAIConfidenceStatus(showAIConfidence: boolean): GeneralActionTypes {
+    return {
+        type: Action.UPDATE_SHOW_AI_CONFIDENCE_STATUS,
+        payload: {
+            showAIConfidence,
+        },
+    };
+}

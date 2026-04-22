@@ -72,7 +72,8 @@ export class AIPoseDetectionActions {
                             isVisible: true,
                             isCreatedByAI: true,
                             status: LabelStatus.UNDECIDED,
-                            suggestedLabel: keypoint.part
+                            suggestedLabel: keypoint.part,
+                            confidence: keypoint.score
                         }
                     })
             })

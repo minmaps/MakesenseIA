@@ -33,6 +33,55 @@ public sealed class WorkflowDialogViewModelTests
     }
 
     [Fact]
+    public void ProjectSetupDialogViewModel_RequiresImagesAndLabelsBeforeConfirm()
+    {
+        var dialog = new ProjectSetupDialogViewModel(
+            "sample",
+            ProjectKind.ObjectDetection,
+            () => [@"C:\images\a.png"],
+            () => ["car", "person"],
+            _ => Task.FromResult(true),
+            () => Task.FromResult(false),
+            _ => { },
+            isCancelable: false);
+
+        Assert.False(dialog.IsCancelable);
+        Assert.False(dialog.ConfirmCommand.CanExecute(null));
+
+        dialog.BrowseImagesCommand.Execute(null);
+        Assert.False(dialog.ConfirmCommand.CanExecute(null));
+
+        dialog.LoadLabelsFromFileCommand.Execute(null);
+        Assert.True(dialog.ConfirmCommand.CanExecute(null));
+        Assert.Equal(["car", "person"], dialog.ParsedLabelsPreview);
+    }
+
+    [Fact]
+    public void ProjectSetupDialogViewModel_CanOpenExistingProjectFromStartup()
+    {
+        var opened = false;
+        var closed = false;
+        var dialog = new ProjectSetupDialogViewModel(
+            "sample",
+            ProjectKind.ObjectDetection,
+            () => null,
+            () => null,
+            _ => Task.FromResult(false),
+            () =>
+            {
+                opened = true;
+                return Task.FromResult(true);
+            },
+            _ => closed = true,
+            isCancelable: false);
+
+        dialog.OpenExistingProjectCommand.Execute(null);
+
+        Assert.True(opened);
+        Assert.True(closed);
+    }
+
+    [Fact]
     public void ImportAnnotationsDialogViewModel_ChangingFormat_ClearsSelectedPaths()
     {
         var dialog = new ImportAnnotationsDialogViewModel(
@@ -67,6 +116,10 @@ public sealed class WorkflowDialogViewModelTests
         Assert.Contains(".csv", dialog.DefaultExtensionHint, StringComparison.Ordinal);
 
         dialog.SelectedFormat = AnnotationFormat.Yolo;
+
+        Assert.Contains(".zip", dialog.DefaultExtensionHint, StringComparison.Ordinal);
+
+        dialog.SelectedFormat = AnnotationFormat.YoloImageTxt;
 
         Assert.Contains(".zip", dialog.DefaultExtensionHint, StringComparison.Ordinal);
     }

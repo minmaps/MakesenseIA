@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -100,6 +101,10 @@ public sealed class EditorOverlayControl : Canvas
         DependencyProperty.Register(nameof(PanOffsetY), typeof(double), typeof(EditorOverlayControl),
             new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty ShowConfidenceProperty =
+        DependencyProperty.Register(nameof(ShowConfidence), typeof(bool), typeof(EditorOverlayControl),
+            new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private readonly Brush _fillBrush = new SolidColorBrush(Color.FromArgb(56, 79, 209, 197));
     private readonly Pen _shapePen = new(new SolidColorBrush(Color.FromRgb(79, 209, 197)), 2.0);
     private readonly Pen _selectedPen = new(new SolidColorBrush(Color.FromRgb(255, 196, 0)), 3.0);
@@ -107,6 +112,8 @@ public sealed class EditorOverlayControl : Canvas
     private readonly Pen _suggestionPen = new(new SolidColorBrush(Color.FromRgb(255, 112, 67)), 2.0) { DashStyle = DashStyles.Dash };
     private readonly Brush _pointBrush = new SolidColorBrush(Color.FromRgb(255, 255, 255));
     private readonly Brush _handleBrush = new SolidColorBrush(Color.FromRgb(255, 196, 0));
+    private readonly Brush _confidenceTextBrush = Brushes.White;
+    private readonly Brush _confidenceBackgroundBrush = new SolidColorBrush(Color.FromArgb(220, 18, 32, 51));
     private readonly Brush _imagePlaceholderBrush = new SolidColorBrush(Color.FromRgb(10, 18, 30));
     private readonly List<Point2D> _pendingPolygon = [];
 
@@ -179,6 +186,12 @@ public sealed class EditorOverlayControl : Canvas
     {
         get => (double)GetValue(PanOffsetYProperty);
         set => SetValue(PanOffsetYProperty, value);
+    }
+
+    public bool ShowConfidence
+    {
+        get => (bool)GetValue(ShowConfidenceProperty);
+        set => SetValue(ShowConfidenceProperty, value);
     }
 
     public void CancelPendingGeometry()
@@ -543,6 +556,50 @@ public sealed class EditorOverlayControl : Canvas
                 dc.DrawGeometry(fill, pen, geometry);
                 break;
         }
+
+        DrawConfidence(dc, annotation, imageRect);
+    }
+
+    private void DrawConfidence(DrawingContext dc, AnnotationRecord annotation, Rect imageRect)
+    {
+        if (!ShowConfidence ||
+            string.IsNullOrWhiteSpace(annotation.SuggestedLabel) ||
+            annotation.SuggestedConfidence is not double confidence)
+        {
+            return;
+        }
+
+        var anchor = GetAnnotationLabelAnchor(annotation, imageRect);
+        if (anchor is null)
+        {
+            return;
+        }
+
+        var text = new FormattedText(
+            $"{ToConfidencePercent(confidence):0}%",
+            CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            new Typeface("Segoe UI"),
+            12,
+            _confidenceTextBrush,
+            VisualTreeHelper.GetDpi(this).PixelsPerDip);
+
+        var origin = new Point(anchor.Value.X, Math.Max(imageRect.Top + 4, anchor.Value.Y - text.Height - 8));
+        var background = new Rect(origin.X - 4, origin.Y - 2, text.Width + 8, text.Height + 4);
+        dc.DrawRoundedRectangle(_confidenceBackgroundBrush, null, background, 4, 4);
+        dc.DrawText(text, origin);
+    }
+
+    private Point? GetAnnotationLabelAnchor(AnnotationRecord annotation, Rect imageRect)
+    {
+        return annotation.Kind switch
+        {
+            AnnotationKind.Rect when annotation.Rect is not null => ToViewport(annotation.Rect.Value, imageRect).TopLeft,
+            AnnotationKind.Point when annotation.Point is not null => ToViewport(annotation.Point.Value, imageRect),
+            AnnotationKind.Line when annotation.Line is not null => ToViewport(annotation.Line.Value.Start, imageRect),
+            AnnotationKind.Polygon when annotation.Polygon is not null && annotation.Polygon.Count > 0 => ToViewport(annotation.Polygon[0], imageRect),
+            _ => null
+        };
     }
 
     private void DrawHandles(DrawingContext dc, AnnotationRecord annotation, Rect imageRect)
@@ -956,6 +1013,12 @@ public sealed class EditorOverlayControl : Canvas
         t = Math.Clamp(t, 0, 1);
         var projection = new Point(start.X + t * dx, start.Y + t * dy);
         return (point - projection).Length;
+    }
+
+    private static double ToConfidencePercent(double confidence)
+    {
+        var percent = confidence <= 1.0 ? confidence * 100.0 : confidence;
+        return Math.Clamp(percent, 0.0, 100.0);
     }
 
     private bool TryHitPolygonEdge(AnnotationRecord annotation, Point viewportPoint, out int insertIndex)

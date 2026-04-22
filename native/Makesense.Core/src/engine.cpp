@@ -338,6 +338,146 @@ ms_result_code native_engine::run_inference(const ms_inference_request& request)
     return MS_RESULT_OK;
 }
 
+ms_result_code native_engine::run_inference_batch(const ms_inference_batch_request& request)
+{
+    if (request.model_path == nullptr || request.task_name == nullptr || request.image_paths_blob == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::error_code error;
+    if (!std::filesystem::exists(request.model_path, error))
+    {
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    const auto model_size = std::filesystem::file_size(request.model_path, error);
+    if (error)
+    {
+        return MS_RESULT_ERROR;
+    }
+
+    if (model_size > to_bytes(performance_.max_vram_mb))
+    {
+        std::scoped_lock lock(state_mutex_);
+        clear_batch_inference_locked();
+        batch_inference_result_code_ = MS_RESULT_RESOURCE_LIMIT;
+        batch_inference_status_message_ = L"Model rejected because it exceeds the configured VRAM budget.";
+        update_status(batch_inference_status_message_);
+        return MS_RESULT_RESOURCE_LIMIT;
+    }
+
+    auto image_paths = split_lines(request.image_paths_blob);
+    if (image_paths.empty())
+    {
+        std::scoped_lock lock(state_mutex_);
+        clear_batch_inference_locked();
+        batch_inference_result_code_ = MS_RESULT_NOT_FOUND;
+        batch_inference_status_message_ = L"Inference batch rejected because no image was provided.";
+        update_status(batch_inference_status_message_);
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    const auto generation = ++inference_generation_;
+    const std::wstring model_path = request.model_path;
+    const std::wstring task_name = request.task_name;
+    const std::wstring cache_directory = std::filesystem::path(model_path).parent_path().empty()
+        ? (std::filesystem::current_path() / L"trt_cache").wstring()
+        : (std::filesystem::path(model_path).parent_path() / L"trt_cache").wstring();
+
+    {
+        std::scoped_lock lock(state_mutex_);
+        clear_batch_inference_locked();
+        batch_inference_generation_ = generation;
+        batch_inference_running_ = true;
+        batch_inference_result_code_ = MS_RESULT_OK;
+        batch_inference_status_message_ = L"Inference batch started.";
+        batch_inference_results_.resize(image_paths.size());
+        for (std::size_t index = 0; index < image_paths.size(); ++index)
+        {
+            auto& result = batch_inference_results_[index];
+            result.generation = generation;
+            result.active_image_path = image_paths[index];
+            result.model_path = model_path;
+            result.task_name = task_name;
+            result.result_code = MS_RESULT_NOT_FOUND;
+            result.status_message = L"Queued.";
+        }
+
+        update_status(batch_inference_status_message_);
+    }
+
+    for (std::size_t index = 0; index < image_paths.size(); ++index)
+    {
+        const auto image_path = image_paths[index];
+        inference_executor_.submit([this, generation, index, image_path, model_path, task_name, model_size, cache_directory]
+        {
+            stored_inference_result stored;
+            stored.generation = generation;
+            stored.active_image_path = image_path;
+            stored.model_path = model_path;
+            stored.task_name = task_name;
+
+            if (generation != inference_generation_.load())
+            {
+                stored.result_code = MS_RESULT_NOT_FOUND;
+                stored.status_message = L"Inference batch was superseded.";
+            }
+            else
+            {
+                inference_run_result inference_result;
+                std::wstring status_message;
+                const inference_run_request backend_request
+                {
+                    .model_path = model_path,
+                    .task_name = task_name,
+                    .image_path = image_path,
+                    .cache_directory = cache_directory,
+                    .image_size = {},
+                    .max_vram_mb = performance_.max_vram_mb
+                };
+
+                const auto backend_result = inference_backend_->run(backend_request, inference_result, status_message);
+                stored.backend_name = inference_result.backend_name;
+                stored.provider_name = inference_result.provider_name;
+                stored.status_message = status_message.empty() ? inference_result.status_message : status_message;
+                stored.result_code = backend_result;
+                stored.suggestions = std::move(inference_result.suggestions);
+            }
+
+            std::scoped_lock lock(state_mutex_);
+            if (batch_inference_generation_ != generation || index >= batch_inference_results_.size())
+            {
+                return;
+            }
+
+            batch_inference_results_[index] = std::move(stored);
+            batch_inference_completed_ = std::min<std::uint32_t>(
+                static_cast<std::uint32_t>(batch_inference_results_.size()),
+                batch_inference_completed_ + 1U);
+
+            if (batch_inference_results_[index].result_code != MS_RESULT_OK)
+            {
+                batch_inference_result_code_ = batch_inference_results_[index].result_code;
+            }
+
+            if (batch_inference_completed_ >= batch_inference_results_.size())
+            {
+                batch_inference_running_ = false;
+                vram_cache_.touch(model_path, static_cast<std::size_t>(std::min<std::uintmax_t>(model_size, to_bytes(performance_.max_vram_mb))));
+                batch_inference_status_message_ = L"Inference batch completed.";
+                update_status(batch_inference_status_message_);
+            }
+            else
+            {
+                batch_inference_status_message_ = L"Inference batch running.";
+            }
+        });
+    }
+
+    return MS_RESULT_OK;
+}
+
 ms_result_code native_engine::get_latest_inference_summary(ms_inference_result_summary* summary) const
 {
     if (summary == nullptr)
@@ -354,16 +494,19 @@ ms_result_code native_engine::get_latest_inference_summary(ms_inference_result_s
         return MS_RESULT_NOT_FOUND;
     }
 
-    std::memset(summary, 0, sizeof(ms_inference_result_summary));
-    copy_wstring(summary->active_image_path, latest_inference_active_image_);
-    copy_wstring(summary->model_path, latest_inference_model_path_);
-    copy_wstring(summary->task_name, latest_inference_task_name_);
-    copy_wstring(summary->backend_name, latest_inference_backend_name_);
-    copy_wstring(summary->provider_name, latest_inference_provider_name_);
-    copy_wstring(summary->status_message, latest_inference_status_message_);
-    summary->suggestion_count = static_cast<std::uint32_t>(latest_inference_suggestions_.size());
-    summary->generation = latest_inference_generation_;
-    summary->result_code = latest_inference_result_code_;
+    const stored_inference_result stored
+    {
+        .generation = latest_inference_generation_,
+        .active_image_path = latest_inference_active_image_,
+        .model_path = latest_inference_model_path_,
+        .task_name = latest_inference_task_name_,
+        .backend_name = latest_inference_backend_name_,
+        .provider_name = latest_inference_provider_name_,
+        .status_message = latest_inference_status_message_,
+        .result_code = latest_inference_result_code_,
+        .suggestions = latest_inference_suggestions_
+    };
+    store_inference_summary(summary, stored);
     return MS_RESULT_OK;
 }
 
@@ -380,20 +523,62 @@ ms_result_code native_engine::get_latest_inference_suggestion(std::uint32_t inde
         return MS_RESULT_NOT_FOUND;
     }
 
-    const auto& source = latest_inference_suggestions_[index];
-    std::memset(suggestion, 0, sizeof(ms_inference_suggestion));
-    suggestion->kind = source.kind;
-    suggestion->confidence = source.confidence;
-    suggestion->is_visible = source.is_visible ? 1U : 0U;
-    copy_wstring(suggestion->id, source.id);
-    copy_wstring(suggestion->label_name, source.label_name);
-    copy_wstring(suggestion->suggested_label, source.suggested_label);
-    suggestion->rect_x = source.rect_x;
-    suggestion->rect_y = source.rect_y;
-    suggestion->rect_width = source.rect_width;
-    suggestion->rect_height = source.rect_height;
-    suggestion->point_x = source.point_x;
-    suggestion->point_y = source.point_y;
+    copy_inference_suggestion(suggestion, latest_inference_suggestions_[index]);
+    return MS_RESULT_OK;
+}
+
+ms_result_code native_engine::get_inference_batch_status(ms_inference_batch_status* status) const
+{
+    if (status == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::scoped_lock lock(state_mutex_);
+    std::memset(status, 0, sizeof(ms_inference_batch_status));
+    copy_wstring(status->status_message, batch_inference_status_message_);
+    status->completed_count = batch_inference_completed_;
+    status->total_count = static_cast<std::uint32_t>(batch_inference_results_.size());
+    status->result_count = batch_inference_running_ ? 0U : static_cast<std::uint32_t>(batch_inference_results_.size());
+    status->is_running = batch_inference_running_ ? 1U : 0U;
+    status->generation = batch_inference_generation_;
+    status->result_code = batch_inference_result_code_;
+    return MS_RESULT_OK;
+}
+
+ms_result_code native_engine::get_inference_batch_result_summary(std::uint32_t index, ms_inference_result_summary* summary) const
+{
+    if (summary == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::scoped_lock lock(state_mutex_);
+    if (batch_inference_running_ || index >= batch_inference_results_.size())
+    {
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    store_inference_summary(summary, batch_inference_results_[index]);
+    return MS_RESULT_OK;
+}
+
+ms_result_code native_engine::get_inference_batch_result_suggestion(std::uint32_t result_index, std::uint32_t suggestion_index, ms_inference_suggestion* suggestion) const
+{
+    if (suggestion == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    std::scoped_lock lock(state_mutex_);
+    if (batch_inference_running_ ||
+        result_index >= batch_inference_results_.size() ||
+        suggestion_index >= batch_inference_results_[result_index].suggestions.size())
+    {
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    copy_inference_suggestion(suggestion, batch_inference_results_[result_index].suggestions[suggestion_index]);
     return MS_RESULT_OK;
 }
 
@@ -712,6 +897,47 @@ void native_engine::clear_latest_inference_result_locked()
     latest_inference_status_message_.clear();
     latest_inference_result_code_ = MS_RESULT_NOT_FOUND;
     latest_inference_suggestions_.clear();
+}
+
+void native_engine::clear_batch_inference_locked()
+{
+    batch_inference_generation_ = 0;
+    batch_inference_completed_ = 0;
+    batch_inference_running_ = false;
+    batch_inference_result_code_ = MS_RESULT_NOT_FOUND;
+    batch_inference_status_message_.clear();
+    batch_inference_results_.clear();
+}
+
+void native_engine::store_inference_summary(ms_inference_result_summary* summary, const stored_inference_result& source) const
+{
+    std::memset(summary, 0, sizeof(ms_inference_result_summary));
+    copy_wstring(summary->active_image_path, source.active_image_path);
+    copy_wstring(summary->model_path, source.model_path);
+    copy_wstring(summary->task_name, source.task_name);
+    copy_wstring(summary->backend_name, source.backend_name);
+    copy_wstring(summary->provider_name, source.provider_name);
+    copy_wstring(summary->status_message, source.status_message);
+    summary->suggestion_count = static_cast<std::uint32_t>(source.suggestions.size());
+    summary->generation = source.generation;
+    summary->result_code = source.result_code;
+}
+
+void native_engine::copy_inference_suggestion(ms_inference_suggestion* suggestion, const native_inference_suggestion& source) const
+{
+    std::memset(suggestion, 0, sizeof(ms_inference_suggestion));
+    suggestion->kind = source.kind;
+    suggestion->confidence = source.confidence;
+    suggestion->is_visible = source.is_visible ? 1U : 0U;
+    copy_wstring(suggestion->id, source.id);
+    copy_wstring(suggestion->label_name, source.label_name);
+    copy_wstring(suggestion->suggested_label, source.suggested_label);
+    suggestion->rect_x = source.rect_x;
+    suggestion->rect_y = source.rect_y;
+    suggestion->rect_width = source.rect_width;
+    suggestion->rect_height = source.rect_height;
+    suggestion->point_x = source.point_x;
+    suggestion->point_y = source.point_y;
 }
 
 void native_engine::store_latest_inference_result_locked(

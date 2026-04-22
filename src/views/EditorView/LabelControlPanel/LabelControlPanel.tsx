@@ -22,9 +22,10 @@ interface IProps {
     labelData: LabelRect | LabelPoint;
     imageData: ImageData;
     updateImageDataById: (id: string, newImageData: ImageData) => any;
+    showConfidence: boolean;
 }
 
-const LabelControlPanel: React.FC<IProps> = ({position, updatePreventCustomCursorStatus, activeLabelId, highlightedLabelId, labelData, imageData, updateImageDataById}) => {
+const LabelControlPanel: React.FC<IProps> = ({position, updatePreventCustomCursorStatus, activeLabelId, highlightedLabelId, labelData, imageData, updateImageDataById, showConfidence}) => {
     const [isActive, setIsActiveStatus] = useState(false);
 
     const onMouseEnter = () => {
@@ -86,6 +87,15 @@ const LabelControlPanel: React.FC<IProps> = ({position, updatePreventCustomCurso
         return isActive || labelData.id === activeLabelId || labelData.id === highlightedLabelId
     };
 
+    const toConfidencePercent = (confidence: number): number => {
+        const percent = confidence <= 1 ? confidence * 100 : confidence;
+        return Math.min(100, Math.max(0, percent));
+    };
+
+    const confidenceLabel = showConfidence && labelData.confidence !== undefined
+        ? `${toConfidencePercent(labelData.confidence).toFixed(0)}%`
+        : null;
+
     return <div
         className={getClassName()}
         style={{top: position.y, left: position.x}}
@@ -110,8 +120,9 @@ const LabelControlPanel: React.FC<IProps> = ({position, updatePreventCustomCurso
             {labelData.suggestedLabel && LabelActions.labelExistsInLabelNames(labelData.suggestedLabel) ?
                 <div className="SuggestedLabel">
                     {labelData.suggestedLabel}
+                    {confidenceLabel && <span className="ConfidenceValue">{confidenceLabel}</span>}
                 </div> :
-                null
+                confidenceLabel && <div className="SuggestedLabel ConfidenceOnly">{confidenceLabel}</div>
             }
         </>}
     </div>

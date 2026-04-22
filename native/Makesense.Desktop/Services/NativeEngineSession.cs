@@ -31,6 +31,10 @@ public sealed record NativeInferenceSuggestion(
     float PointX,
     float PointY);
 
+public sealed record NativeInferenceImageResult(
+    NativeInferenceResultSummary Summary,
+    IReadOnlyList<NativeInferenceSuggestion> Suggestions);
+
 public sealed class NativeEngineSession : IDisposable
 {
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -169,6 +173,76 @@ public sealed class NativeEngineSession : IDisposable
         }), $"Inference request submitted: {Path.GetFileName(modelPath)} ({taskName}).");
 
         WaitForLatestInferenceSummary(previousGeneration, modelPath, taskName);
+    }
+
+    public IReadOnlyList<NativeInferenceImageResult> RunInferenceBatch(
+        string modelPath,
+        string taskName,
+        IReadOnlyList<string> imagePaths,
+        Action<int, int>? progress = null)
+    {
+        if (_engineHandle == nint.Zero || imagePaths.Count == 0)
+        {
+            return Array.Empty<NativeInferenceImageResult>();
+        }
+
+        var blob = string.Join('\n', imagePaths);
+        MsResultCode result;
+        lock (_nativeCallGate)
+        {
+            result = NativeMethods.ms_run_inference_batch(_engineHandle, new MsInferenceBatchRequest
+            {
+                ModelPath = modelPath,
+                TaskName = taskName,
+                ImagePathsBlob = blob
+            });
+        }
+
+        if (result != MsResultCode.Ok)
+        {
+            StatusChanged?.Invoke(this, $"Inference batch failed to start. Result={result}.");
+            return Array.Empty<NativeInferenceImageResult>();
+        }
+
+        MsInferenceBatchStatus status;
+        do
+        {
+            Thread.Sleep(200);
+            lock (_nativeCallGate)
+            {
+                result = NativeMethods.ms_get_inference_batch_status(_engineHandle, out status);
+            }
+
+            if (result != MsResultCode.Ok)
+            {
+                StatusChanged?.Invoke(this, $"Unable to read inference batch status. Result={result}.");
+                return Array.Empty<NativeInferenceImageResult>();
+            }
+
+            progress?.Invoke((int)status.CompletedCount, (int)status.TotalCount);
+        }
+        while (status.IsRunning != 0);
+
+        var results = new List<NativeInferenceImageResult>((int)status.ResultCount);
+        for (var index = 0U; index < status.ResultCount; index++)
+        {
+            NativeInferenceResultSummary summary;
+            lock (_nativeCallGate)
+            {
+                result = NativeMethods.ms_get_inference_batch_result_summary(_engineHandle, index, out var nativeSummary);
+                summary = ToModel(nativeSummary);
+            }
+
+            if (result != MsResultCode.Ok)
+            {
+                continue;
+            }
+
+            var suggestions = ReadBatchInferenceSuggestions(index, summary.SuggestionCount);
+            results.Add(new NativeInferenceImageResult(summary, suggestions));
+        }
+
+        return results;
     }
 
     public NativeInferenceResultSummary? ReadLatestInferenceSummary()
@@ -437,5 +511,55 @@ public sealed class NativeEngineSession : IDisposable
             suggestion.RectHeight,
             suggestion.PointX,
             suggestion.PointY);
+    }
+
+    private IReadOnlyList<NativeInferenceSuggestion> ReadBatchInferenceSuggestions(uint resultIndex, uint suggestionCount)
+    {
+        if (suggestionCount == 0)
+        {
+            return Array.Empty<NativeInferenceSuggestion>();
+        }
+
+        var suggestions = new List<NativeInferenceSuggestion>((int)suggestionCount);
+        for (var suggestionIndex = 0U; suggestionIndex < suggestionCount; suggestionIndex++)
+        {
+            try
+            {
+                MsResultCode result;
+                MsInferenceSuggestion suggestion;
+                lock (_nativeCallGate)
+                {
+                    result = NativeMethods.ms_get_inference_batch_result_suggestion(_engineHandle, resultIndex, suggestionIndex, out suggestion);
+                }
+
+                if (result != MsResultCode.Ok)
+                {
+                    break;
+                }
+
+                suggestions.Add(ToModel(suggestion));
+            }
+            catch (Exception exception)
+            {
+                StatusChanged?.Invoke(this, exception.Message);
+                break;
+            }
+        }
+
+        return suggestions;
+    }
+
+    private static NativeInferenceResultSummary ToModel(MsInferenceResultSummary summary)
+    {
+        return new NativeInferenceResultSummary(
+            summary.ActiveImagePath ?? string.Empty,
+            summary.ModelPath ?? string.Empty,
+            summary.TaskName ?? string.Empty,
+            summary.BackendName ?? string.Empty,
+            summary.ProviderName ?? string.Empty,
+            summary.StatusMessage ?? string.Empty,
+            summary.SuggestionCount,
+            summary.Generation,
+            summary.ResultCode);
     }
 }

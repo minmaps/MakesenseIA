@@ -21,6 +21,8 @@ public sealed record AnnotationRecord
     public IReadOnlyList<Point2D>? Polygon { get; init; }
 
     public string? SuggestedLabel { get; init; }
+
+    public double? SuggestedConfidence { get; init; }
 }
 
 public sealed record LabelClass
@@ -111,4 +113,20 @@ public sealed record ProjectState
     public InferenceModelDescriptor? ActiveModel { get; init; }
 
     public string? ActiveImageId { get; init; }
+
+    public string? ActiveLabelId { get; init; }
+
+    public string? ActiveAnnotationId { get; init; }
+
+    public AnnotationTool SelectedTool { get; init; } = AnnotationTool.Rect;
+
+    public AnnotationFormat? SelectedImportFormat { get; init; }
+
+    public AnnotationFormat? SelectedExportFormat { get; init; }
+
+    public double ViewZoom { get; init; } = 1.0;
+
+    public double PanOffsetX { get; init; }
+
+    public double PanOffsetY { get; init; }
 }

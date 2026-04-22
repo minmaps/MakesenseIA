@@ -109,11 +109,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (IsTextInputSource(e.OriginalSource))
-        {
-            return;
-        }
-
         if (viewModel.IsDialogOpen)
         {
             if (e.Key == Key.Escape && viewModel.ActiveDialog?.CancelCommand.CanExecute(null) == true)
@@ -122,6 +117,16 @@ public partial class MainWindow : Window
                 e.Handled = true;
             }
 
+            return;
+        }
+
+        if (TryHandleFileShortcut(e, viewModel))
+        {
+            return;
+        }
+
+        if (IsTextInputSource(e.OriginalSource))
+        {
             return;
         }
 
@@ -286,6 +291,55 @@ public partial class MainWindow : Window
                 viewModel.NudgeSelectedAnnotation(0, step);
                 e.Handled = true;
                 break;
+        }
+    }
+
+    private static bool TryHandleFileShortcut(KeyEventArgs e, MainWindowViewModel viewModel)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) != ModifierKeys.Control)
+        {
+            return false;
+        }
+
+        if ((Keyboard.Modifiers & ModifierKeys.Shift) == ModifierKeys.Shift && e.Key == Key.S)
+        {
+            if (viewModel.SaveProjectAsCommand.CanExecute(null))
+            {
+                viewModel.SaveProjectAsCommand.Execute(null);
+            }
+
+            e.Handled = true;
+            return true;
+        }
+
+        switch (e.Key)
+        {
+            case Key.N:
+                if (viewModel.NewProjectCommand.CanExecute(null))
+                {
+                    viewModel.NewProjectCommand.Execute(null);
+                }
+
+                e.Handled = true;
+                return true;
+            case Key.O:
+                if (viewModel.OpenProjectCommand.CanExecute(null))
+                {
+                    viewModel.OpenProjectCommand.Execute(null);
+                }
+
+                e.Handled = true;
+                return true;
+            case Key.S:
+                if (viewModel.SaveProjectCommand.CanExecute(null))
+                {
+                    viewModel.SaveProjectCommand.Execute(null);
+                }
+
+                e.Handled = true;
+                return true;
+            default:
+                return false;
         }
     }
 

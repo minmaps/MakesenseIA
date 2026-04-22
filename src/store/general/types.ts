@@ -18,6 +18,7 @@ export type GeneralState = {
     imageDragMode: boolean;
     crossHairVisible: boolean;
     enablePerClassColoration: boolean;
+    showAIConfidence: boolean;
     activeContext: ContextType;
     projectData: ProjectData;
     zoom: number;
@@ -93,6 +94,13 @@ interface UpdatePerClassColoration {
     }
 }
 
+interface UpdateShowAIConfidence {
+    type: typeof Action.UPDATE_SHOW_AI_CONFIDENCE_STATUS,
+    payload: {
+        showAIConfidence: boolean;
+    }
+}
+
 export type GeneralActionTypes = UpdateProjectData
     | UpdateWindowSize
     | UpdateActivePopupType
@@ -103,3 +111,4 @@ export type GeneralActionTypes = UpdateProjectData
     | UpdateCrossHairVisibleStatus
     | UpdateZoom
     | UpdatePerClassColoration
+    | UpdateShowAIConfidence

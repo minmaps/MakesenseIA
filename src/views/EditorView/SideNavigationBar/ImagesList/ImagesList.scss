@@ -11,9 +11,55 @@
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 4px 0;
-    padding: 10px 0;
+    gap: 8px;
+    padding: 10px;
     border-bottom: solid 1px $darkThemeFirstColor;
+  }
+
+  .ImagesListFilterSelect {
+    width: 100%;
+    min-height: 30px;
+    padding: 4px 8px;
+    border: 1px solid $darkThemeFirstColor;
+    border-radius: 4px;
+    background: $darkThemeFirstColor;
+    color: white;
+    font-weight: 700;
+  }
+
+  .ImagesListConfidenceFilter {
+    width: 100%;
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+
+    .ImagesListConfidenceHeader,
+    label {
+      display: grid;
+      grid-template-columns: 42px 1fr;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .ImagesListShowConfidence {
+      grid-template-columns: auto 1fr;
+      justify-content: start;
+      color: white;
+
+      input {
+        width: auto;
+      }
+    }
+
+    .ImagesListConfidenceHeader {
+      grid-template-columns: 1fr auto;
+      color: $darkThemeSecondColor;
+    }
+
+    input {
+      width: 100%;
+    }
   }
 
   .ImagesListBody {

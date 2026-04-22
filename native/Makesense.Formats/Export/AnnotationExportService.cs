@@ -19,6 +19,9 @@ public sealed class AnnotationExportService
             case AnnotationFormat.Yolo:
                 ExportYolo(state, outputPath);
                 break;
+            case AnnotationFormat.YoloImageTxt:
+                ExportYoloImageTxt(state, outputPath);
+                break;
             case AnnotationFormat.Voc:
                 ExportVoc(state, outputPath);
                 break;
@@ -40,8 +43,6 @@ public sealed class AnnotationExportService
     {
         using var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create);
         var labels = state.Labels.ToArray();
-        var labelIndex = labels.Select((label, index) => new { label.Id, Index = index })
-            .ToDictionary(item => item.Id, item => item.Index);
 
         var labelsEntry = archive.CreateEntry("labels.txt");
         using (var writer = new StreamWriter(labelsEntry.Open(), Encoding.UTF8))
@@ -51,6 +52,20 @@ public sealed class AnnotationExportService
                 writer.WriteLine(label.Name);
             }
         }
+
+        WriteYoloImageTextEntries(archive, state, labels);
+    }
+
+    private static void ExportYoloImageTxt(ProjectState state, string outputPath)
+    {
+        using var archive = ZipFile.Open(outputPath, ZipArchiveMode.Create);
+        WriteYoloImageTextEntries(archive, state, state.Labels.ToArray());
+    }
+
+    private static void WriteYoloImageTextEntries(ZipArchive archive, ProjectState state, IReadOnlyList<LabelClass> labels)
+    {
+        var labelIndex = labels.Select((label, index) => new { label.Id, Index = index })
+            .ToDictionary(item => item.Id, item => item.Index);
 
         foreach (var image in state.Images)
         {

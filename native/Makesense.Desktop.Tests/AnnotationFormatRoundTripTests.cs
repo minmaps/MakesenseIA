@@ -166,6 +166,69 @@ public sealed class AnnotationFormatRoundTripTests
     }
 
     [Fact]
+    public void YoloImageTxtExporter_OutputZip_ContainsOnlyImageTextFiles()
+    {
+        var label = new LabelClass
+        {
+            Id = "label-1",
+            Name = "car"
+        };
+
+        var project = new ProjectState
+        {
+            Name = "sample",
+            ProjectKind = ProjectKind.ObjectDetection,
+            Labels = [label],
+            Images =
+            [
+                new ImageRecord
+                {
+                    Id = "img-1",
+                    Path = @"C:\images\image_000001.png",
+                    FileName = "image_000001.png",
+                    FileSizeBytes = 12,
+                    PixelSize = new Size2D(1000, 500),
+                    Annotations =
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = "ann-1",
+                            Kind = AnnotationKind.Rect,
+                            LabelId = label.Id,
+                            Rect = new RectD(400, 150, 200, 200)
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var zipPath = Path.ChangeExtension(Path.GetTempFileName(), ".zip");
+        File.Delete(zipPath);
+
+        try
+        {
+            var exporter = new AnnotationExportService();
+            exporter.Export(project, AnnotationFormat.YoloImageTxt, zipPath);
+
+            using var archive = ZipFile.OpenRead(zipPath);
+            Assert.Null(archive.GetEntry("labels.txt"));
+            var imageEntry = archive.GetEntry("image_000001.txt");
+            Assert.NotNull(imageEntry);
+
+            using var reader = new StreamReader(imageEntry!.Open());
+            var content = reader.ReadToEnd();
+            Assert.Contains("0 0.5 0.5 0.2 0.4", content, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (File.Exists(zipPath))
+            {
+                File.Delete(zipPath);
+            }
+        }
+    }
+
+    [Fact]
     public void YoloExporter_OutputZip_CanBeImportedBack()
     {
         var label = new LabelClass

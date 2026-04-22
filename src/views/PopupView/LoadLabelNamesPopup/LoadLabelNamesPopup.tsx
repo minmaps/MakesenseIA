@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import './LoadLabelNamesPopup.scss';
 import { AppState } from '../../../store';
 import { connect } from 'react-redux';
-import { updateLabelNames } from '../../../store/labels/actionCreators';
+import { updateActiveLabelNameId, updateLabelNames } from '../../../store/labels/actionCreators';
 import { GenericYesNoPopup } from '../GenericYesNoPopup/GenericYesNoPopup';
 import { PopupWindowType } from '../../../data/enums/PopupWindowType';
 import { updateActivePopupType } from '../../../store/general/actionCreators';
@@ -19,11 +19,12 @@ import {INotification} from '../../../store/notifications/types';
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
     updateLabelNamesAction: (labels: LabelName[]) => any;
+    updateActiveLabelNameIdAction: (activeLabelNameId: string) => any;
     submitNewNotificationAction: (notification: INotification) => any;
 }
 
 const LoadLabelNamesPopup: React.FC<IProps> = (
-    { updateActivePopupTypeAction, updateLabelNamesAction, submitNewNotificationAction }
+    { updateActivePopupTypeAction, updateLabelNamesAction, updateActiveLabelNameIdAction, submitNewNotificationAction }
 ) => {
     const [labelsList, setLabelsList] = useState([]);
     const [invalidFileLoadedStatus, setInvalidFileLoadedStatus] = useState(false);
@@ -55,6 +56,7 @@ const LoadLabelNamesPopup: React.FC<IProps> = (
     const onAccept = () => {
         if (labelsList.length > 0) {
             updateLabelNamesAction(labelsList);
+            updateActiveLabelNameIdAction(labelsList[0].id);
             updateActivePopupTypeAction(null);
         }
     };
@@ -136,6 +138,7 @@ const LoadLabelNamesPopup: React.FC<IProps> = (
 const mapDispatchToProps = {
     updateActivePopupTypeAction: updateActivePopupType,
     updateLabelNamesAction: updateLabelNames,
+    updateActiveLabelNameIdAction: updateActiveLabelNameId,
     submitNewNotificationAction: submitNewNotification
 };
 

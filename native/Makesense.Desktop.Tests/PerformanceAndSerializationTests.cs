@@ -2,6 +2,7 @@ using Makesense.Formats.Contracts;
 using Makesense.Formats.Export;
 using Makesense.Formats.Project;
 using Makesense.Formats.Serialization;
+using Makesense.Desktop.Interop;
 using Makesense.Desktop.Services;
 using Makesense.Desktop.ViewModels;
 using System.Reflection;
@@ -155,6 +156,27 @@ public sealed class PerformanceAndSerializationTests
     }
 
     [Fact]
+    public void PerformanceMonitorViewModel_Load_PublishesRealtimeProcessMetrics()
+    {
+        var viewModel = new PerformanceMonitorViewModel();
+
+        viewModel.Load(new PerformanceMonitorSnapshot(
+            RamUsedMb: 512.4,
+            VramUsedMb: 128.8,
+            CpuUsagePercent: 36.5,
+            GpuUsagePercent: 41.2,
+            GpuMetricsAvailable: true,
+            CapturedAt: DateTimeOffset.UtcNow));
+
+        Assert.Equal(512.4, viewModel.RamUsedMb);
+        Assert.Equal(128.8, viewModel.VramUsedMb);
+        Assert.Equal(36.5, viewModel.CpuUsagePercent);
+        Assert.Equal(41.2, viewModel.GpuUsagePercent);
+        Assert.True(viewModel.GpuMetricsAvailable);
+        Assert.Contains("temps réel", viewModel.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ImageMetadataService_ReadsRealRepositoryAsset()
     {
         var workspaceRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
@@ -205,6 +227,216 @@ public sealed class PerformanceAndSerializationTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public async Task ProjectStateSerializer_RoundTripsResumeWorkspaceState()
+    {
+        var state = new ProjectState
+        {
+            Name = "sample",
+            ProjectKind = ProjectKind.ObjectDetection,
+            ProjectPath = @"C:\datasets\sample.msproj",
+            ActiveImageId = "img-1",
+            ActiveLabelId = "label-1",
+            ActiveAnnotationId = "ann-1",
+            SelectedTool = AnnotationTool.Polygon,
+            SelectedImportFormat = AnnotationFormat.Coco,
+            SelectedExportFormat = AnnotationFormat.Vgg,
+            ViewZoom = 2.25,
+            PanOffsetX = 42,
+            PanOffsetY = -18,
+            Labels =
+            [
+                new LabelClass
+                {
+                    Id = "label-1",
+                    Name = "vehicle"
+                }
+            ],
+            Images =
+            [
+                new ImageRecord
+                {
+                    Id = "img-1",
+                    Path = @"C:\images\a.png",
+                    FileName = "a.png",
+                    FileSizeBytes = 1234,
+                    Annotations =
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = "ann-1",
+                            Kind = AnnotationKind.Polygon,
+                            LabelId = "label-1",
+                            Polygon =
+                            [
+                                new Point2D(0, 0),
+                                new Point2D(10, 0),
+                                new Point2D(10, 10)
+                            ]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var path = Path.GetTempFileName();
+
+        try
+        {
+            await ProjectStateSerializer.SaveAsync(state, path);
+            var reloaded = await ProjectStateSerializer.LoadAsync(path);
+
+            Assert.NotNull(reloaded);
+            Assert.Equal("img-1", reloaded!.ActiveImageId);
+            Assert.Equal("label-1", reloaded.ActiveLabelId);
+            Assert.Equal("ann-1", reloaded.ActiveAnnotationId);
+            Assert.Equal(AnnotationTool.Polygon, reloaded.SelectedTool);
+            Assert.Equal(AnnotationFormat.Coco, reloaded.SelectedImportFormat);
+            Assert.Equal(AnnotationFormat.Vgg, reloaded.SelectedExportFormat);
+            Assert.Equal(2.25, reloaded.ViewZoom);
+            Assert.Equal(42, reloaded.PanOffsetX);
+            Assert.Equal(-18, reloaded.PanOffsetY);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void MainWindowViewModel_RunActiveModelCommand_RequiresImagesModelPathAndLabel()
+    {
+        var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(settingsDirectory, "settings.json");
+        Directory.CreateDirectory(settingsDirectory);
+
+        try
+        {
+            var performanceService = new PerformanceConfigService(new HardwareInfoService(), settingsPath);
+            using var session = new NativeEngineSession();
+            using var viewModel = new MainWindowViewModel(performanceService, session, new PerformanceConfig
+            {
+                MaxRamMb = 1024,
+                MaxVramMb = 1024,
+                MaxDecodeThreads = 2,
+                MaxIoThreads = 2,
+                MaxInferenceJobs = 1,
+                MaxPrefetchImages = 8
+            });
+
+            Assert.False(viewModel.RunActiveModelCommand.CanExecute(null));
+
+            viewModel.ActiveModelPath = @"C:\models\detector.onnx";
+
+            Assert.False(viewModel.RunActiveModelCommand.CanExecute(null));
+
+            var replaceState = typeof(MainWindowViewModel).GetMethod("ReplaceState", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(replaceState);
+            replaceState!.Invoke(viewModel, [new ProjectState
+            {
+                Name = "sample",
+                ProjectKind = ProjectKind.ObjectDetection,
+                PerformanceConfig = new PerformanceConfig
+                {
+                    MaxRamMb = 1024,
+                    MaxVramMb = 1024,
+                    MaxDecodeThreads = 2,
+                    MaxIoThreads = 2,
+                    MaxInferenceJobs = 1,
+                    MaxPrefetchImages = 8
+                },
+                Images =
+                [
+                    new ImageRecord
+                    {
+                        Id = "img-1",
+                        Path = @"C:\images\a.png",
+                        FileName = "a.png",
+                        FileSizeBytes = 1234,
+                        PixelSize = new Size2D(800, 600)
+                    }
+                ]
+            }]);
+
+            Assert.False(viewModel.RunActiveModelCommand.CanExecute(null));
+
+            replaceState!.Invoke(viewModel, [new ProjectState
+            {
+                Name = "sample",
+                ProjectKind = ProjectKind.ObjectDetection,
+                PerformanceConfig = new PerformanceConfig
+                {
+                    MaxRamMb = 1024,
+                    MaxVramMb = 1024,
+                    MaxDecodeThreads = 2,
+                    MaxIoThreads = 2,
+                    MaxInferenceJobs = 1,
+                    MaxPrefetchImages = 8
+                },
+                Labels =
+                [
+                    new LabelClass
+                    {
+                        Id = "label-1",
+                        Name = "target"
+                    }
+                ],
+                Images =
+                [
+                    new ImageRecord
+                    {
+                        Id = "img-1",
+                        Path = @"C:\images\a.png",
+                        FileName = "a.png",
+                        FileSizeBytes = 1234,
+                        PixelSize = new Size2D(800, 600)
+                    }
+                ]
+            }]);
+
+            Assert.True(viewModel.RunActiveModelCommand.CanExecute(null));
+        }
+        finally
+        {
+            if (Directory.Exists(settingsDirectory))
+            {
+                Directory.Delete(settingsDirectory, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MainWindowViewModel_ConvertedNativeSuggestionsKeepAssignedLabelAndSuggestionState()
+    {
+        var convertMethod = typeof(MainWindowViewModel).GetMethod("ConvertNativeSuggestion", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(convertMethod);
+
+        var label = new LabelClass
+        {
+            Id = "label-1",
+            Name = "target"
+        };
+        var suggestion = new NativeInferenceSuggestion(
+            "annotation-1",
+            MsInferenceSuggestionKind.Rect,
+            0.9f,
+            true,
+            "raw",
+            "raw",
+            10,
+            20,
+            30,
+            40,
+            0,
+            0);
+
+        var converted = Assert.IsType<AnnotationRecord>(convertMethod!.Invoke(null, [suggestion, label]));
+
+        Assert.Equal("label-1", converted.LabelId);
+        Assert.Equal("target", converted.SuggestedLabel);
+        Assert.NotNull(converted.Rect);
     }
 
     [Fact]

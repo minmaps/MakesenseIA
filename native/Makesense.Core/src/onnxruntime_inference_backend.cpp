@@ -10,6 +10,7 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -29,6 +30,13 @@ namespace
     constexpr float nms_iou_threshold = 0.45f;
     constexpr float letterbox_fill_value = 114.0f / 255.0f;
 
+    std::size_t vram_budget_bytes(std::uint32_t max_vram_mb)
+    {
+        return max_vram_mb == 0
+            ? std::numeric_limits<std::size_t>::max()
+            : static_cast<std::size_t>(max_vram_mb) * 1024ULL * 1024ULL;
+    }
+
     struct session_entry
     {
         std::wstring model_path;
@@ -36,6 +44,7 @@ namespace
         std::uintmax_t model_size{0};
         std::filesystem::file_time_type last_write_time{};
         std::unique_ptr<Ort::Session> session;
+        std::mutex run_mutex;
         std::string input_name;
         std::vector<std::string> output_names;
         std::vector<const char*> output_name_ptrs;
@@ -670,6 +679,7 @@ namespace
             std::vector<Ort::Value> outputs;
             try
             {
+                std::scoped_lock run_lock(session->run_mutex);
                 outputs = session->session->Run(
                     Ort::RunOptions{nullptr},
                     input_names.data(),
@@ -738,15 +748,13 @@ namespace
             }
 
             const auto cache_key = request.model_path;
+            std::scoped_lock lock(cache_mutex_);
+            const auto existing = session_cache_.find(cache_key);
+            if (existing != session_cache_.end() &&
+                existing->second->model_size == model_size &&
+                existing->second->last_write_time == last_write_time)
             {
-                std::scoped_lock lock(cache_mutex_);
-                const auto existing = session_cache_.find(cache_key);
-                if (existing != session_cache_.end() &&
-                    existing->second->model_size == model_size &&
-                    existing->second->last_write_time == last_write_time)
-                {
-                    return existing->second;
-                }
+                return existing->second;
             }
 
             auto created = create_session(request, model_size, last_write_time, status);
@@ -755,7 +763,6 @@ namespace
                 return nullptr;
             }
 
-            std::scoped_lock lock(cache_mutex_);
             session_cache_[cache_key] = created;
             return created;
         }
@@ -792,6 +799,7 @@ namespace
                         trt_options.trt_fp16_enable = 1;
                         trt_options.trt_engine_cache_enable = 1;
                         trt_options.trt_engine_cache_path = cache_path.c_str();
+                        trt_options.trt_max_workspace_size = vram_budget_bytes(request.max_vram_mb);
                         trt_options.trt_max_partition_iterations = 1000;
                         trt_options.trt_min_subgraph_size = 1;
                         options.AppendExecutionProvider_TensorRT(trt_options);
@@ -800,6 +808,8 @@ namespace
                     {
                         OrtCUDAProviderOptions cuda_options{};
                         cuda_options.device_id = 0;
+                        cuda_options.gpu_mem_limit = vram_budget_bytes(request.max_vram_mb);
+                        cuda_options.arena_extend_strategy = 1;
                         options.AppendExecutionProvider_CUDA(cuda_options);
                     }
 

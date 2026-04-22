@@ -23,5 +23,6 @@ public partial class App : Application
 
         MainWindow = window;
         window.Show();
+        viewModel.OpenStartupProjectDialog();
     }
 }

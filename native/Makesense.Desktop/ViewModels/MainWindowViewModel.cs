@@ -22,7 +22,11 @@ namespace Makesense.Desktop.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
+    private const string ProjectFileFilter = "Makesense Project (*.msproj;*.json)|*.msproj;*.json|JSON Manifest (*.json)|*.json|All Files (*.*)|*.*";
+    private const string DefaultProjectExtension = ".msproj";
+
     private readonly PerformanceConfigService _performanceConfigService;
+    private readonly IPerformanceMonitorService _performanceMonitorService;
     private readonly ImageMetadataService _imageMetadataService;
     private readonly AnnotationImportService _annotationImportService;
     private readonly AnnotationExportService _annotationExportService;
@@ -30,6 +34,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private ProjectState _projectState;
     private string _statusMessage;
     private string _projectPath;
+    private string? _projectFilePath;
     private string _activeModelPath;
     private string _selectedInferenceTask;
     private string _newLabelName;
@@ -44,6 +49,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private AnnotationFormat _selectedImportFormat;
     private AnnotationFormat _selectedExportFormat;
     private ImageFilterMode _selectedImageFilter;
+    private bool _showConfidence;
+    private double _minimumSuggestionConfidence;
+    private double _maximumSuggestionConfidence = 100;
     private double _viewZoom = 1.0;
     private double _panOffsetX;
     private double _panOffsetY;
@@ -63,7 +71,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _polygonPointsText;
     private ModalDialogViewModel? _activeDialog;
     private readonly DispatcherTimer _notificationTimer;
+    private readonly DispatcherTimer _performanceMonitorTimer;
     private readonly Dispatcher _uiDispatcher;
+    private bool _isPerformanceMonitorSampling;
+    private bool _isDisposed;
     private int _inferenceBatchCompletedImages;
     private int _inferenceBatchTotalImages;
     private bool _isInferenceBatchRunning;
@@ -75,14 +86,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel(
         PerformanceConfigService performanceConfigService,
         NativeEngineSession engineSession,
-        PerformanceConfig initialConfig)
+        PerformanceConfig initialConfig,
+        IPerformanceMonitorService? performanceMonitorService = null)
     {
         _performanceConfigService = performanceConfigService;
+        _performanceMonitorService = performanceMonitorService ?? new ProcessPerformanceMonitorService();
         _imageMetadataService = new ImageMetadataService();
         _annotationImportService = new AnnotationImportService();
         _annotationExportService = new AnnotationExportService();
         EngineSession = engineSession;
         Performance = new PerformanceConfigViewModel();
+        PerformanceMonitor = new PerformanceMonitorViewModel();
         Performance.Load(initialConfig);
 
         _statusMessage = "Native session ready.";
@@ -116,6 +130,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             Interval = TimeSpan.FromSeconds(1)
         };
         _notificationTimer.Tick += OnNotificationTimerTick;
+        _performanceMonitorTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _performanceMonitorTimer.Tick += OnPerformanceMonitorTimerTick;
 
         InferenceTasks =
         [
@@ -134,12 +153,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         OpenImagesCommand = new RelayCommand(OpenImages, () => !IsImportRunning);
         AddImagesCommand = new RelayCommand(AddImages, () => Images.Count > 0 && !IsImportRunning);
+        NewProjectCommand = new RelayCommand(NewProject, () => !IsImportRunning);
         OpenProjectCommand = new RelayCommand(OpenProject, () => !IsImportRunning);
+        SaveProjectCommand = new RelayCommand(SaveProject, () => IsProjectReady && !IsImportRunning);
+        SaveProjectAsCommand = new RelayCommand(SaveProjectAs, () => IsProjectReady && !IsImportRunning);
         ExportManifestCommand = new RelayCommand(ExportManifest);
         ImportAnnotationsCommand = new RelayCommand(OpenImportAnnotationsDialog, () => Images.Count > 0 && !IsImportRunning);
         ExportAnnotationsCommand = new RelayCommand(OpenExportAnnotationsDialog, () => Images.Count > 0 && !IsImportRunning);
         ApplyPerformanceLimitsCommand = new RelayCommand(ApplyPerformanceLimits);
-        RunInferenceCommand = new RelayCommand(OpenInferenceDialog, () => !IsImportRunning);
+        RunInferenceCommand = new RelayCommand(OpenInferenceDialog, CanOpenInferenceDialog);
+        RunActiveModelCommand = new RelayCommand(RunActiveModelInference, CanRunActiveModelInference);
         AddLabelCommand = new RelayCommand(AddLabel);
         OpenLabelManagerCommand = new RelayCommand(OpenLabelManagerDialog);
         RemoveLabelCommand = new RelayCommand(RemoveLabel, () => SelectedLabel is not null);
@@ -173,6 +196,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ApplyToolFormatDefaults();
         EngineSession.StatusChanged += OnSessionStatusChanged;
         _notificationTimer.Start();
+        _performanceMonitorTimer.Start();
+        QueuePerformanceMonitorSample();
         LoadSelectedAnnotationEditor();
     }
 
@@ -193,7 +218,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ImageFilterMode.All,
         ImageFilterMode.CurrentToolPending,
         ImageFilterMode.CurrentToolAnnotated,
-        ImageFilterMode.WithSuggestions
+        ImageFilterMode.WithSuggestions,
+        ImageFilterMode.WithoutSuggestions,
+        ImageFilterMode.WithoutAnnotations
     ];
 
     public IReadOnlyList<AnnotationFormat> AvailableImportFormats => FormatSupport.GetImportFormats(MapTool(SelectedTool));
@@ -204,7 +231,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public RelayCommand AddImagesCommand { get; }
 
+    public RelayCommand NewProjectCommand { get; }
+
     public RelayCommand OpenProjectCommand { get; }
+
+    public RelayCommand SaveProjectCommand { get; }
+
+    public RelayCommand SaveProjectAsCommand { get; }
 
     public RelayCommand ExportManifestCommand { get; }
 
@@ -215,6 +248,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ApplyPerformanceLimitsCommand { get; }
 
     public RelayCommand RunInferenceCommand { get; }
+
+    public RelayCommand RunActiveModelCommand { get; }
 
     public RelayCommand AddLabelCommand { get; }
 
@@ -258,6 +293,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public PerformanceConfigViewModel Performance { get; }
 
+    public PerformanceMonitorViewModel PerformanceMonitor { get; }
+
     public ICollectionView FilteredImagesView { get; }
 
     public string RuntimeSummary => "WPF + HwndHost + C++20 Core + D3D11/Direct2D";
@@ -293,7 +330,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool IsInferenceBatchRunning
     {
         get => _isInferenceBatchRunning;
-        private set => SetProperty(ref _isInferenceBatchRunning, value);
+        private set
+        {
+            if (SetProperty(ref _isInferenceBatchRunning, value))
+            {
+                RaiseInferenceCommandCanExecuteChanged();
+            }
+        }
     }
 
     public double ImportProgressPercent => _importTotalImages == 0
@@ -374,6 +417,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public bool HasFilteredImages => FilteredImageCount > 0;
 
+    public bool IsProjectReady => Images.Count > 0 && Labels.Count > 0;
+
     public string EmptyStateMessage => HasImagesLoaded
         ? "No image matches the current filter."
         : "No images loaded.";
@@ -421,13 +466,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public string ActiveModelPath
     {
         get => _activeModelPath;
-        set => SetProperty(ref _activeModelPath, value);
+        set
+        {
+            if (SetProperty(ref _activeModelPath, value))
+            {
+                RunActiveModelCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public string SelectedInferenceTask
     {
         get => _selectedInferenceTask;
-        set => SetProperty(ref _selectedInferenceTask, value);
+        set
+        {
+            if (SetProperty(ref _selectedInferenceTask, value))
+            {
+                RunActiveModelCommand.RaiseCanExecuteChanged();
+            }
+        }
     }
 
     public string NewLabelName
@@ -456,6 +513,64 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetProperty(ref _selectedImageFilter, value))
             {
                 RefreshImageBrowser();
+            }
+        }
+    }
+
+    public double MinimumSuggestionConfidence
+    {
+        get => _minimumSuggestionConfidence;
+        set
+        {
+            var normalized = Math.Clamp(Math.Round(value), 0, 100);
+            if (SetProperty(ref _minimumSuggestionConfidence, normalized))
+            {
+                if (_maximumSuggestionConfidence < normalized)
+                {
+                    _maximumSuggestionConfidence = normalized;
+                    RaisePropertyChanged(nameof(MaximumSuggestionConfidence));
+                }
+
+                RaisePropertyChanged(nameof(SuggestionConfidenceRangeLabel));
+                RefreshImageBrowser();
+            }
+        }
+    }
+
+    public double MaximumSuggestionConfidence
+    {
+        get => _maximumSuggestionConfidence;
+        set
+        {
+            var normalized = Math.Clamp(Math.Round(value), 0, 100);
+            if (SetProperty(ref _maximumSuggestionConfidence, normalized))
+            {
+                if (_minimumSuggestionConfidence > normalized)
+                {
+                    _minimumSuggestionConfidence = normalized;
+                    RaisePropertyChanged(nameof(MinimumSuggestionConfidence));
+                }
+
+                RaisePropertyChanged(nameof(SuggestionConfidenceRangeLabel));
+                RefreshImageBrowser();
+            }
+        }
+    }
+
+    public string SuggestionConfidenceRangeLabel => $"{MinimumSuggestionConfidence:0}% - {MaximumSuggestionConfidence:0}%";
+
+    public bool ShowConfidence
+    {
+        get => _showConfidence;
+        set
+        {
+            if (SetProperty(ref _showConfidence, value))
+            {
+                var selectedAnnotationId = SelectedAnnotation?.Record.Id;
+                RefreshAnnotationCollection();
+                SelectedAnnotation = selectedAnnotationId is null
+                    ? null
+                    : Annotations.FirstOrDefault(annotation => annotation.Record.Id == selectedAnnotationId);
             }
         }
     }
@@ -504,6 +619,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetProperty(ref _selectedLabel, value))
             {
                 RemoveLabelCommand.RaiseCanExecuteChanged();
+                RaiseInferenceCommandCanExecuteChanged();
             }
         }
     }
@@ -646,10 +762,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
+        _isDisposed = true;
         EngineSession.StatusChanged -= OnSessionStatusChanged;
         _notificationTimer.Tick -= OnNotificationTimerTick;
+        _performanceMonitorTimer.Tick -= OnPerformanceMonitorTimerTick;
         _notificationTimer.Stop();
+        _performanceMonitorTimer.Stop();
+        _performanceMonitorService.Dispose();
         EngineSession.Dispose();
+    }
+
+    public void OpenStartupProjectDialog()
+    {
+        if (IsProjectReady)
+        {
+            return;
+        }
+
+        ShowProjectSetupDialog(isCancelable: false);
+    }
+
+    private void NewProject()
+    {
+        ShowProjectSetupDialog(isCancelable: true);
+    }
+
+    private void ShowProjectSetupDialog(bool isCancelable)
+    {
+        ShowDialog(new ProjectSetupDialogViewModel(
+            ProjectName,
+            _projectState.ProjectKind,
+            BrowseProjectImagePaths,
+            LoadLabelNamesFromFile,
+            ConfirmProjectSetup,
+            OpenExistingProjectFromSetupAsync,
+            CloseDialog,
+            isCancelable));
     }
 
     private void ApplyPerformanceLimits()
@@ -664,37 +812,220 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private async void OpenProject()
     {
+        await OpenProjectFromFileDialogAsync();
+    }
+
+    private async Task<bool> OpenExistingProjectFromSetupAsync()
+    {
+        return await OpenProjectFromFileDialogAsync();
+    }
+
+    private async Task<bool> OpenProjectFromFileDialogAsync()
+    {
+        var path = BrowseProjectOpenPath();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        return await LoadProjectAsync(path);
+    }
+
+    private string? BrowseProjectOpenPath()
+    {
         var dialog = new OpenFileDialog
         {
-            Filter = "Makesense Manifest (*.json)|*.json|All Files (*.*)|*.*",
+            Filter = ProjectFileFilter,
             Multiselect = false
         };
 
-        if (dialog.ShowDialog() != true)
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    private async Task<bool> LoadProjectAsync(string path)
+    {
+        try
         {
+            var state = await ProjectStateSerializer.LoadAsync(path);
+            if (state is null)
+            {
+                StatusMessage = "Unable to read project file.";
+                return false;
+            }
+
+            var normalized = state with
+            {
+                ProjectPath = path,
+                PerformanceConfig = state.PerformanceConfig.Normalize()
+            };
+
+            ReplaceState(normalized);
+            _performanceConfigService.Save(_projectState.PerformanceConfig);
+            Performance.Load(_projectState.PerformanceConfig);
+
+            _projectFilePath = path;
+            ProjectPath = path;
+            EngineSession.OpenProject(path);
+            await Task.Run(() => EngineSession.OpenImages(_projectState.Images.Select(image => image.Path)));
+
+            ApplyRestoredWorkspaceState();
+            ResetInferenceBatchState();
+            StatusMessage = $"Loaded project '{ProjectName}' with {Images.Count} images and {Labels.Count} labels.";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"Unable to open project: {exception.Message}";
+            return false;
+        }
+    }
+
+    private async void SaveProject()
+    {
+        if (string.IsNullOrWhiteSpace(_projectFilePath))
+        {
+            await SaveProjectAsAsync();
             return;
         }
 
-        var state = await ProjectStateSerializer.LoadAsync(dialog.FileName);
-        if (state is null)
+        await SaveProjectToPathAsync(_projectFilePath);
+    }
+
+    private async void SaveProjectAs()
+    {
+        await SaveProjectAsAsync();
+    }
+
+    private async Task<bool> SaveProjectAsAsync()
+    {
+        var path = BrowseProjectSavePath(ProjectName);
+        if (string.IsNullOrWhiteSpace(path))
         {
-            StatusMessage = "Unable to read project manifest.";
-            return;
+            return false;
         }
 
-        ReplaceState(state with { PerformanceConfig = state.PerformanceConfig.Normalize() });
-        _performanceConfigService.Save(_projectState.PerformanceConfig);
+        return await SaveProjectToPathAsync(path);
+    }
 
-        ProjectPath = dialog.FileName;
-        EngineSession.OpenProject(dialog.FileName);
-        EngineSession.OpenImages(_projectState.Images.Select(image => image.Path));
+    private string? BrowseProjectSavePath(string projectName)
+    {
+        var currentProjectDirectory = string.IsNullOrWhiteSpace(_projectFilePath)
+            ? null
+            : Path.GetDirectoryName(_projectFilePath);
+        var dialog = new SaveFileDialog
+        {
+            Filter = ProjectFileFilter,
+            DefaultExt = DefaultProjectExtension,
+            AddExtension = true,
+            FileName = $"{SanitizeProjectFileName(projectName)}{DefaultProjectExtension}",
+            InitialDirectory = !string.IsNullOrWhiteSpace(currentProjectDirectory) && Directory.Exists(currentProjectDirectory)
+                ? currentProjectDirectory
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    private async Task<bool> SaveProjectToPathAsync(string path, bool publishStatus = true)
+    {
+        try
+        {
+            var state = BuildProjectSnapshot(path);
+            await ProjectStateSerializer.SaveAsync(state, path);
+            _projectState = state;
+            _projectFilePath = path;
+            ProjectPath = path;
+            SaveProjectCommand.RaiseCanExecuteChanged();
+            SaveProjectAsCommand.RaiseCanExecuteChanged();
+
+            if (publishStatus)
+            {
+                StatusMessage = $"Project saved to {path}.";
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = $"Unable to save project: {exception.Message}";
+            return false;
+        }
+    }
+
+    private ProjectState BuildProjectSnapshot(string? path)
+    {
+        return _projectState with
+        {
+            ProjectPath = path ?? _projectFilePath ?? _projectState.ProjectPath,
+            ActiveImageId = SelectedImage?.Id,
+            ActiveLabelId = SelectedLabel?.Id,
+            ActiveAnnotationId = SelectedAnnotation?.Record.Id,
+            ActiveModel = string.IsNullOrWhiteSpace(ActiveModelPath)
+                ? null
+                : new InferenceModelDescriptor
+                {
+                    Name = Path.GetFileNameWithoutExtension(ActiveModelPath),
+                    Path = ActiveModelPath,
+                    Task = SelectedInferenceTask,
+                    Backend = string.IsNullOrWhiteSpace(ActiveInferenceBackend) ? ActiveInferenceProvider : ActiveInferenceBackend
+                },
+            SelectedTool = SelectedTool,
+            SelectedImportFormat = AvailableImportFormats.Contains(SelectedImportFormat) ? SelectedImportFormat : null,
+            SelectedExportFormat = AvailableExportFormats.Contains(SelectedExportFormat) ? SelectedExportFormat : null,
+            ViewZoom = ViewZoom,
+            PanOffsetX = PanOffsetX,
+            PanOffsetY = PanOffsetY,
+            PerformanceConfig = Performance.ToModel()
+        };
+    }
+
+    private void ApplyRestoredWorkspaceState()
+    {
+        var restoredTool = AvailableTools.Contains(_projectState.SelectedTool)
+            ? _projectState.SelectedTool
+            : (_projectState.ProjectKind == ProjectKind.ImageRecognition ? AnnotationTool.ImageRecognition : AnnotationTool.Rect);
+
+        SelectedTool = restoredTool;
+
+        if (_projectState.SelectedImportFormat is { } importFormat && AvailableImportFormats.Contains(importFormat))
+        {
+            SelectedImportFormat = importFormat;
+        }
+
+        if (_projectState.SelectedExportFormat is { } exportFormat && AvailableExportFormats.Contains(exportFormat))
+        {
+            SelectedExportFormat = exportFormat;
+        }
 
         SelectedImage = _projectState.Images.FirstOrDefault(image => image.Id == _projectState.ActiveImageId) ?? _projectState.Images.FirstOrDefault();
-        SelectedLabel = _projectState.Labels.FirstOrDefault();
+        SelectedLabel = _projectState.ActiveLabelId is null
+            ? _projectState.Labels.FirstOrDefault()
+            : _projectState.Labels.FirstOrDefault(label => label.Id == _projectState.ActiveLabelId) ?? _projectState.Labels.FirstOrDefault();
+        SelectedAnnotation = _projectState.ActiveAnnotationId is null
+            ? null
+            : Annotations.FirstOrDefault(annotation => annotation.Record.Id == _projectState.ActiveAnnotationId);
         ActiveModelPath = _projectState.ActiveModel?.Path ?? string.Empty;
         SelectedInferenceTask = _projectState.ActiveModel?.Task ?? SelectedInferenceTask;
-        ResetInferenceBatchState();
-        StatusMessage = $"Loaded manifest with {Images.Count} images and {Labels.Count} labels.";
+        UpdateViewportTransform(
+            Math.Clamp(_projectState.ViewZoom <= 0 ? 1.0 : _projectState.ViewZoom, 0.1, 12.0),
+            _projectState.PanOffsetX,
+            _projectState.PanOffsetY);
+    }
+
+    private static string SanitizeProjectFileName(string projectName)
+    {
+        var fallbackName = string.IsNullOrWhiteSpace(projectName) ? "makesense-project" : projectName.Trim();
+        if (string.Equals(Path.GetExtension(fallbackName), DefaultProjectExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            fallbackName = Path.GetFileNameWithoutExtension(fallbackName);
+        }
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            fallbackName = fallbackName.Replace(invalidChar, '-');
+        }
+
+        return fallbackName;
     }
 
     private async void OpenImages()
@@ -728,6 +1059,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             ImportProgressMessage = "Registering images in native engine...";
+            _projectFilePath = null;
             ReplaceState(new ProjectState
             {
                 Name = "makesense-native",
@@ -863,6 +1195,100 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return result;
     }
 
+    private string[]? BrowseProjectImagePaths()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "Images|*.png;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff;*.webp",
+            Multiselect = true
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FileNames : null;
+    }
+
+    private async Task<bool> ConfirmProjectSetup(ProjectSetupDialogViewModel dialog)
+    {
+        var labelNames = dialog.ParsedLabelsPreview;
+        if (labelNames.Count == 0)
+        {
+            StatusMessage = "Create or load at least one label before starting the project.";
+            return false;
+        }
+
+        if (dialog.ImagePaths.Count == 0)
+        {
+            StatusMessage = "Select at least one image before starting the project.";
+            return false;
+        }
+
+        var projectFilePath = BrowseProjectSavePath(dialog.ProjectName.Trim());
+        if (string.IsNullOrWhiteSpace(projectFilePath))
+        {
+            StatusMessage = "Project creation canceled because no project file was selected.";
+            return false;
+        }
+
+        try
+        {
+            var importResult = await LoadImageRecordsAsync(dialog.ImagePaths, "Creating project");
+            if (importResult.Images.Length == 0)
+            {
+                StatusMessage = importResult.FailedCount > 0
+                    ? $"Unable to import {importResult.FailedCount} selected image(s)."
+                    : "No images were selected.";
+                return false;
+            }
+
+            var labels = labelNames
+                .Select(labelName => new LabelClass
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Name = labelName
+                })
+                .ToArray();
+
+            ImportProgressMessage = "Registering images in native engine...";
+            ReplaceState(new ProjectState
+            {
+                Name = dialog.ProjectName.Trim(),
+                ProjectKind = dialog.SelectedProjectKind,
+                ProjectPath = projectFilePath,
+                PerformanceConfig = Performance.ToModel(),
+                Images = importResult.Images,
+                Labels = labels
+            });
+
+            SelectedTool = dialog.SelectedProjectKind == ProjectKind.ImageRecognition
+                ? AnnotationTool.ImageRecognition
+                : AnnotationTool.Rect;
+            ResetInferenceBatchState();
+            _projectFilePath = projectFilePath;
+            ProjectPath = projectFilePath;
+            EngineSession.OpenProject(projectFilePath);
+            await Task.Run(() => EngineSession.OpenImages(importResult.Images.Select(image => image.Path)));
+            SelectedImage = Images.FirstOrDefault();
+            SelectedLabel = Labels.FirstOrDefault();
+            if (!await SaveProjectToPathAsync(projectFilePath, publishStatus: false))
+            {
+                return false;
+            }
+
+            StatusMessage = importResult.FailedCount == 0
+                ? $"Project '{ProjectName}' created and saved with {Images.Count} image(s) and {Labels.Count} label(s)."
+                : $"Project '{ProjectName}' created and saved. {importResult.FailedCount} unreadable image(s) were skipped.";
+            return true;
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+            return false;
+        }
+        finally
+        {
+            EndImageImport();
+        }
+    }
+
     private async void ExportManifest()
     {
         var dialog = new SaveFileDialog
@@ -876,20 +1302,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        var state = _projectState with
-        {
-            ProjectPath = ProjectPath,
-            ActiveImageId = SelectedImage?.Id,
-            ActiveModel = string.IsNullOrWhiteSpace(ActiveModelPath)
-                ? null
-                : new InferenceModelDescriptor
-                {
-                    Name = Path.GetFileNameWithoutExtension(ActiveModelPath),
-                    Path = ActiveModelPath,
-                    Task = SelectedInferenceTask,
-                    Backend = ActiveInferenceProvider
-                }
-        };
+        var state = BuildProjectSnapshot(_projectFilePath ?? _projectState.ProjectPath);
 
         await ProjectStateSerializer.SaveAsync(state, dialog.FileName);
         StatusMessage = $"Manifest exported to {dialog.FileName}.";
@@ -918,6 +1331,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void OpenInferenceDialog()
     {
+        if (_projectState.Labels.Count == 0)
+        {
+            StatusMessage = "Create or load at least one label before running inference.";
+            return;
+        }
+
         ShowDialog(new InferenceSetupDialogViewModel(
             InferenceTasks,
             SelectedInferenceTask,
@@ -1290,7 +1709,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return annotation with
                     {
                         LabelId = label?.Id,
-                        SuggestedLabel = null
+                        SuggestedLabel = null,
+                        SuggestedConfidence = null
                     };
                 })
                 .ToArray()
@@ -1343,7 +1763,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                         return annotation with
                         {
                             LabelId = label?.Id,
-                            SuggestedLabel = null
+                            SuggestedLabel = null,
+                            SuggestedConfidence = null
                         };
                     })
                     .ToArray()
@@ -1476,6 +1897,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 AnnotationFormat.Vgg => "JSON (*.json)|*.json",
                 AnnotationFormat.Json => "JSON (*.json)|*.json",
                 AnnotationFormat.Yolo => "ZIP (*.zip)|*.zip",
+                AnnotationFormat.YoloImageTxt => "YOLO image TXT package (*.zip)|*.zip",
                 AnnotationFormat.Voc => "ZIP (*.zip)|*.zip",
                 _ => "All Files (*.*)|*.*"
             },
@@ -1532,13 +1954,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private bool ConfirmRunInference(InferenceSetupDialogViewModel dialog)
     {
+        return TryStartInferenceBatch(dialog.ModelPath, dialog.SelectedInferenceTask);
+    }
+
+    private void RunActiveModelInference()
+    {
+        TryStartInferenceBatch(ActiveModelPath, SelectedInferenceTask);
+    }
+
+    private bool CanRunActiveModelInference()
+    {
+        return !IsImportRunning &&
+            !IsInferenceBatchRunning &&
+            _projectState.Images.Count > 0 &&
+            _projectState.Labels.Count > 0 &&
+            SelectedLabel is not null &&
+            !string.IsNullOrWhiteSpace(ActiveModelPath);
+    }
+
+    private bool CanOpenInferenceDialog()
+    {
+        return !IsImportRunning &&
+            !IsInferenceBatchRunning &&
+            _projectState.Images.Count > 0 &&
+            _projectState.Labels.Count > 0;
+    }
+
+    private bool TryStartInferenceBatch(string modelPath, string taskName)
+    {
         if (IsInferenceBatchRunning)
         {
             StatusMessage = "Inference is already running on the current dataset.";
             return false;
         }
 
-        if (!File.Exists(dialog.ModelPath))
+        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
         {
             StatusMessage = "Select a valid ONNX model file before running inference.";
             return false;
@@ -1550,10 +2000,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        ActiveModelPath = dialog.ModelPath;
-        SelectedInferenceTask = dialog.SelectedInferenceTask;
+        var inferenceLabel = SelectedLabel ?? Labels.FirstOrDefault();
+        if (inferenceLabel is null)
+        {
+            StatusMessage = "Select or create a label before running inference.";
+            return false;
+        }
+
+        SelectedLabel = inferenceLabel;
+        ActiveModelPath = modelPath;
+        SelectedInferenceTask = taskName;
         ResetInferenceBatchState(_projectState.Images.Count);
-        _ = RunInferenceBatchAsync(ActiveModelPath, SelectedInferenceTask, _projectState.Images.ToArray());
+        ActiveInferenceBackend = "Running";
+        ActiveInferenceProvider = "Pending";
+        ActiveInferenceRuntime = $"Starting {taskName} on {_projectState.Images.Count} image(s) using label '{inferenceLabel.Name}'.";
+        StatusMessage = $"Starting inference for {Path.GetFileName(modelPath)} on {_projectState.Images.Count} image(s) using label '{inferenceLabel.Name}'.";
+        _ = RunInferenceBatchAsync(ActiveModelPath, SelectedInferenceTask, _projectState.Images.ToArray(), inferenceLabel.Id);
         return true;
     }
 
@@ -1696,6 +2158,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(PendingReviewImageCount));
         RaisePropertyChanged(nameof(HasImagesLoaded));
         RaisePropertyChanged(nameof(HasFilteredImages));
+        RaisePropertyChanged(nameof(IsProjectReady));
         RaisePropertyChanged(nameof(EmptyStateMessage));
         RaisePropertyChanged(nameof(EmptyStateHint));
         RaisePropertyChanged(nameof(ProjectName));
@@ -1707,6 +2170,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         DeleteAnnotationCommand.RaiseCanExecuteChanged();
         RemoveLabelCommand.RaiseCanExecuteChanged();
         AddImagesCommand.RaiseCanExecuteChanged();
+        NewProjectCommand.RaiseCanExecuteChanged();
+        OpenProjectCommand.RaiseCanExecuteChanged();
+        SaveProjectCommand.RaiseCanExecuteChanged();
+        SaveProjectAsCommand.RaiseCanExecuteChanged();
         PreviousImageCommand.RaiseCanExecuteChanged();
         NextImageCommand.RaiseCanExecuteChanged();
         NextPendingReviewImageCommand.RaiseCanExecuteChanged();
@@ -1716,6 +2183,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         AcceptAllDatasetSuggestionsCommand.RaiseCanExecuteChanged();
         RejectAllDatasetSuggestionsCommand.RaiseCanExecuteChanged();
         ClearNotificationsCommand.RaiseCanExecuteChanged();
+        RunActiveModelCommand.RaiseCanExecuteChanged();
     }
 
     private void RefreshAnnotationCollection()
@@ -1729,7 +2197,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var labels = _projectState.Labels.ToDictionary(label => label.Id, label => label.Name);
         foreach (var annotation in SelectedImage.Annotations)
         {
-            Annotations.Add(new AnnotationItemViewModel(annotation, labels));
+            Annotations.Add(new AnnotationItemViewModel(annotation, labels, ShowConfidence));
         }
 
         if (SelectedAnnotation is not null)
@@ -1778,11 +2246,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ClearNotificationsCommand.RaiseCanExecuteChanged();
     }
 
+    private void OnPerformanceMonitorTimerTick(object? sender, EventArgs e)
+    {
+        QueuePerformanceMonitorSample();
+    }
+
+    private async void QueuePerformanceMonitorSample()
+    {
+        if (_isPerformanceMonitorSampling || _isDisposed)
+        {
+            return;
+        }
+
+        _isPerformanceMonitorSampling = true;
+        try
+        {
+            var snapshot = await Task.Run(_performanceMonitorService.Capture);
+            if (!_isDisposed)
+            {
+                PerformanceMonitor.Load(snapshot);
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isPerformanceMonitorSampling = false;
+        }
+    }
+
     private void RefreshImageBrowser()
     {
         FilteredImagesView.Refresh();
         var visibleImages = FilteredImagesView.Cast<ImageRecord>().ToArray();
-        if (SelectedImage is null && visibleImages.Length > 0)
+        if ((SelectedImage is null || !visibleImages.Any(image => image.Id == SelectedImage.Id)) && visibleImages.Length > 0)
         {
             ApplySelectedImage(
                 visibleImages.FirstOrDefault(),
@@ -1795,6 +2293,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HasFilteredImages));
         RaisePropertyChanged(nameof(EmptyStateMessage));
         RaisePropertyChanged(nameof(EmptyStateHint));
+        PreviousImageCommand.RaiseCanExecuteChanged();
+        NextImageCommand.RaiseCanExecuteChanged();
         NextPendingReviewImageCommand.RaiseCanExecuteChanged();
         NextSuggestionImageCommand.RaiseCanExecuteChanged();
     }
@@ -1813,13 +2313,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return false;
         }
 
-        return SelectedImageFilter switch
+        var matchesMode = SelectedImageFilter switch
         {
             ImageFilterMode.CurrentToolPending => ImageNeedsReview(image),
             ImageFilterMode.CurrentToolAnnotated => ImageHasCurrentToolAnnotations(image),
             ImageFilterMode.WithSuggestions => ImageHasSuggestions(image),
+            ImageFilterMode.WithoutSuggestions => !ImageHasSuggestions(image),
+            ImageFilterMode.WithoutAnnotations => !ImageHasConfirmedAnnotations(image),
             _ => true
         };
+
+        return matchesMode && ImageMatchesSuggestionConfidenceRange(image);
     }
 
     private void PushNotification(string message)
@@ -1910,57 +2414,91 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return image.Annotations.Any(annotation => !string.IsNullOrWhiteSpace(annotation.SuggestedLabel));
     }
 
+    private static bool ImageHasConfirmedAnnotations(ImageRecord image)
+    {
+        return image.Annotations.Any(annotation => string.IsNullOrWhiteSpace(annotation.SuggestedLabel));
+    }
+
     private bool ImageNeedsReview(ImageRecord image)
     {
         return ImageHasSuggestions(image) || !ImageHasCurrentToolAnnotations(image);
     }
 
+    private bool ImageMatchesSuggestionConfidenceRange(ImageRecord image)
+    {
+        if (!IsSuggestionConfidenceRangeActive ||
+            SelectedImageFilter is ImageFilterMode.WithoutSuggestions or ImageFilterMode.WithoutAnnotations)
+        {
+            return true;
+        }
+
+        return image.Annotations.Any(annotation =>
+            !string.IsNullOrWhiteSpace(annotation.SuggestedLabel) &&
+            annotation.SuggestedConfidence is double confidence &&
+            NumberIsInRange(ToConfidencePercent(confidence), MinimumSuggestionConfidence, MaximumSuggestionConfidence));
+    }
+
+    private bool IsSuggestionConfidenceRangeActive => MinimumSuggestionConfidence > 0 || MaximumSuggestionConfidence < 100;
+
+    private static bool NumberIsInRange(double value, double minimum, double maximum)
+    {
+        return value >= minimum && value <= maximum;
+    }
+
     private void SelectImageByOffset(int offset)
     {
-        if (Images.Count == 0)
+        var visibleImages = GetVisibleImages();
+        if (visibleImages.Length == 0)
         {
             return;
         }
 
-        var selectedIndex = SelectedImage is null ? -1 : Images.IndexOf(SelectedImage);
-        var targetIndex = Math.Clamp(selectedIndex + offset, 0, Images.Count - 1);
-        SelectedImage = Images[targetIndex];
-        StatusMessage = $"Active image: {SelectedImage.FileName} ({targetIndex + 1}/{Images.Count}).";
+        var selectedIndex = SelectedImage is null
+            ? -1
+            : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
+        var targetIndex = Math.Clamp(selectedIndex + offset, 0, visibleImages.Length - 1);
+        SelectedImage = visibleImages[targetIndex];
+        StatusMessage = $"Active image: {SelectedImage.FileName} ({targetIndex + 1}/{visibleImages.Length} filtered).";
     }
 
     private void SelectNextImageMatching(Func<ImageRecord, bool> predicate, string fallbackMessage)
     {
-        if (Images.Count == 0)
+        var visibleImages = GetVisibleImages()
+            .Where(predicate)
+            .ToArray();
+        if (visibleImages.Length == 0)
         {
+            StatusMessage = fallbackMessage;
             return;
         }
 
-        var selectedIndex = SelectedImage is null ? -1 : Images.IndexOf(SelectedImage);
-        for (var step = 1; step <= Images.Count; step++)
-        {
-            var candidateIndex = (selectedIndex + step + Images.Count) % Images.Count;
-            var candidate = Images[candidateIndex];
-            if (!predicate(candidate))
-            {
-                continue;
-            }
-
-            SelectedImage = candidate;
-            StatusMessage = $"Active image: {candidate.FileName} ({candidateIndex + 1}/{Images.Count}).";
-            return;
-        }
-
-        StatusMessage = fallbackMessage;
+        var selectedIndex = SelectedImage is null
+            ? -1
+            : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
+        var candidateIndex = (selectedIndex + 1 + visibleImages.Length) % visibleImages.Length;
+        var candidate = visibleImages[candidateIndex];
+        SelectedImage = candidate;
+        StatusMessage = $"Active image: {candidate.FileName} ({candidateIndex + 1}/{visibleImages.Length} filtered).";
     }
 
     private bool CanSelectPreviousImage()
     {
-        return SelectedImage is not null && Images.IndexOf(SelectedImage) > 0;
+        var visibleImages = GetVisibleImages();
+        return SelectedImage is not null && Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id) > 0;
     }
 
     private bool CanSelectNextImage()
     {
-        return SelectedImage is not null && Images.IndexOf(SelectedImage) >= 0 && Images.IndexOf(SelectedImage) < Images.Count - 1;
+        var visibleImages = GetVisibleImages();
+        var selectedIndex = SelectedImage is null
+            ? -1
+            : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
+        return selectedIndex >= 0 && selectedIndex < visibleImages.Length - 1;
+    }
+
+    private ImageRecord[] GetVisibleImages()
+    {
+        return FilteredImagesView.Cast<ImageRecord>().ToArray();
     }
 
     private void LoadSelectedAnnotationEditor()
@@ -1987,7 +2525,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             : string.Empty;
     }
 
-    private async Task RunInferenceBatchAsync(string modelPath, string taskName, IReadOnlyList<ImageRecord> images)
+    private async Task RunInferenceBatchAsync(string modelPath, string taskName, IReadOnlyList<ImageRecord> images, string labelId)
     {
         IsInferenceBatchRunning = true;
         RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
@@ -1995,25 +2533,40 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var originalSelectedImagePath = SelectedImage?.Path ?? string.Empty;
-            for (var index = 0; index < images.Count; index++)
-            {
-                var image = images[index];
-                await RunInferenceForImageAsync(modelPath, taskName, image.Path);
-                _inferenceBatchCompletedImages = index + 1;
-                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
-                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
-            }
+            var imagePaths = images.Select(image => image.Path).ToArray();
+            var results = await Task.Run(() =>
+                EngineSession.RunInferenceBatch(modelPath, taskName, imagePaths, (completedImages, totalImages) =>
+                {
+                    _ = _uiDispatcher.BeginInvoke(() =>
+                    {
+                        _inferenceBatchCompletedImages = completedImages;
+                        _inferenceBatchTotalImages = totalImages;
+                        RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                        RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+                    });
+                }));
 
             await _uiDispatcher.InvokeAsync(() =>
             {
-                if (!string.IsNullOrWhiteSpace(originalSelectedImagePath))
+                var inferenceLabel = Labels.FirstOrDefault(label => label.Id == labelId);
+                if (inferenceLabel is null)
                 {
-                    EngineSession.SetActiveImage(originalSelectedImagePath);
+                    StatusMessage = "Inference completed, but the selected label is no longer available.";
+                    return;
                 }
 
-                var imagesWithSuggestions = SuggestionImageCount;
-                StatusMessage = $"Batch inference completed. {imagesWithSuggestions} image(s) now contain suggestions.";
+                var batchSummary = ApplyNativeInferenceBatchResults(modelPath, taskName, results, inferenceLabel);
+
+                _inferenceBatchCompletedImages = images.Count;
+                _inferenceBatchTotalImages = images.Count;
+                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+
+                UpdateInferenceBackendIdentity(batchSummary.LatestSummary);
+                ActiveInferenceRuntime = batchSummary.FailedImages == 0
+                    ? $"Batch inference completed. {batchSummary.UpdatedImages} image(s), {batchSummary.SuggestionCount} suggestion(s) for '{inferenceLabel.Name}'."
+                    : $"Batch inference completed with {batchSummary.FailedImages} failed image(s). {batchSummary.UpdatedImages} image(s), {batchSummary.SuggestionCount} suggestion(s) for '{inferenceLabel.Name}'.";
+                StatusMessage = ActiveInferenceRuntime;
             });
         }
         finally
@@ -2027,7 +2580,62 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task RunInferenceForImageAsync(string modelPath, string taskName, string imagePath)
+    private InferenceBatchApplySummary ApplyNativeInferenceBatchResults(
+        string modelPath,
+        string taskName,
+        IReadOnlyList<NativeInferenceImageResult> results,
+        LabelClass inferenceLabel)
+    {
+        var resultsByImagePath = results
+            .Where(result =>
+                string.Equals(result.Summary.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(result.Summary.TaskName, taskName, StringComparison.Ordinal))
+            .GroupBy(result => result.Summary.ActiveImagePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+
+        var updatedImages = new List<ImageRecord>(_projectState.Images.Count);
+        var changed = false;
+        var updatedImageCount = 0;
+        var suggestionCount = 0;
+        var failedImageCount = resultsByImagePath.Values.Count(result => result.Summary.ResultCode != MsInferenceResultCode.Ok);
+        NativeInferenceResultSummary? latestSummary = results.LastOrDefault()?.Summary;
+
+        foreach (var image in _projectState.Images)
+        {
+            if (!resultsByImagePath.TryGetValue(image.Path, out var result) ||
+                result.Summary.ResultCode != MsInferenceResultCode.Ok ||
+                result.Suggestions.Count == 0)
+            {
+                updatedImages.Add(image);
+                continue;
+            }
+
+            var convertedSuggestions = result.Suggestions
+                .Select(suggestion => ConvertNativeSuggestion(suggestion, inferenceLabel))
+                .ToArray();
+            var updatedImage = image with
+            {
+                Annotations = image.Annotations
+                    .Where(annotation => string.IsNullOrWhiteSpace(annotation.SuggestedLabel))
+                    .Concat(convertedSuggestions)
+                    .ToArray()
+            };
+
+            updatedImages.Add(updatedImage);
+            updatedImageCount++;
+            suggestionCount += convertedSuggestions.Length;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            ReplaceState(_projectState.ReplaceImages(updatedImages));
+        }
+
+        return new InferenceBatchApplySummary(updatedImageCount, suggestionCount, failedImageCount, latestSummary);
+    }
+
+    private async Task RunInferenceForImageAsync(string modelPath, string taskName, string imagePath, string labelId)
     {
         try
         {
@@ -2038,7 +2646,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             });
             await _uiDispatcher.InvokeAsync(() =>
             {
-                ApplyNativeInferenceSuggestions(modelPath, taskName, imagePath);
+                ApplyNativeInferenceSuggestions(modelPath, taskName, imagePath, labelId);
                 var selectedImagePath = SelectedImage?.Path ?? string.Empty;
                 if (!string.Equals(selectedImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
                 {
@@ -2052,58 +2660,106 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void ApplyNativeInferenceSuggestions(string modelPath, string taskName, string imagePath)
+    private void ApplyNativeInferenceSuggestions(string modelPath, string taskName, string imagePath, string labelId)
     {
         var summary = EngineSession.ReadLatestInferenceSummary();
-        UpdateInferenceRuntime(summary);
+        var selectedImagePath = SelectedImage?.Path ?? string.Empty;
+        var shouldPublishImageStatus = string.IsNullOrWhiteSpace(selectedImagePath) ||
+            string.Equals(selectedImagePath, imagePath, StringComparison.OrdinalIgnoreCase);
+
+        if (shouldPublishImageStatus)
+        {
+            UpdateInferenceRuntime(summary);
+        }
+        else
+        {
+            UpdateInferenceBackendIdentity(summary);
+        }
+
         if (summary is null ||
             !string.Equals(summary.ModelPath, modelPath, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(summary.TaskName, taskName, StringComparison.Ordinal) ||
             !string.Equals(summary.ActiveImagePath, imagePath, StringComparison.OrdinalIgnoreCase))
         {
-            StatusMessage = $"Inference requested for {Path.GetFileName(modelPath)} on {Path.GetFileName(imagePath)}. No native result available.";
+            if (shouldPublishImageStatus)
+            {
+                StatusMessage = $"Inference requested for {Path.GetFileName(modelPath)} on {Path.GetFileName(imagePath)}. No native result available.";
+            }
+
             return;
         }
 
         var suggestions = EngineSession.ReadLatestInferenceSuggestions();
         var targetImage = _projectState.Images.FirstOrDefault(image => string.Equals(image.Path, summary.ActiveImagePath, StringComparison.OrdinalIgnoreCase));
+        var inferenceLabel = Labels.FirstOrDefault(label => label.Id == labelId);
+        if (inferenceLabel is null)
+        {
+            if (shouldPublishImageStatus)
+            {
+                StatusMessage = "Inference completed, but the selected label is no longer available.";
+            }
+
+            return;
+        }
+
         if (targetImage is null)
         {
-            StatusMessage = $"Inference completed for {Path.GetFileName(modelPath)}, but the target image is no longer loaded in the project.";
+            if (shouldPublishImageStatus)
+            {
+                StatusMessage = $"Inference completed for {Path.GetFileName(modelPath)}, but the target image is no longer loaded in the project.";
+            }
+
             return;
         }
 
         if (summary.ResultCode != MsInferenceResultCode.Ok)
         {
-            StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
-                ? $"Inference failed on {summary.ProviderName}."
-                : summary.StatusMessage;
+            if (shouldPublishImageStatus)
+            {
+                StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
+                    ? $"Inference failed on {summary.ProviderName}."
+                    : summary.StatusMessage;
+            }
+
             return;
         }
 
         if (suggestions.Count == 0)
         {
-            StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
-                ? $"Inference completed on {summary.ProviderName} with no supported suggestions."
-                : summary.StatusMessage;
+            if (shouldPublishImageStatus)
+            {
+                StatusMessage = string.IsNullOrWhiteSpace(summary.StatusMessage)
+                    ? $"Inference completed on {summary.ProviderName} with no supported suggestions."
+                    : summary.StatusMessage;
+            }
+
             return;
         }
 
+        var convertedSuggestions = suggestions
+            .Select(suggestion => ConvertNativeSuggestion(suggestion, inferenceLabel))
+            .ToArray();
         var updatedImage = targetImage with
         {
             Annotations = targetImage.Annotations
                 .Where(annotation => string.IsNullOrWhiteSpace(annotation.SuggestedLabel))
-                .Concat(suggestions.Select(ConvertNativeSuggestion))
+                .Concat(convertedSuggestions)
                 .ToArray()
         };
 
         ReplaceImage(updatedImage);
         if (SelectedImage?.Id == updatedImage.Id)
         {
-            SelectedAnnotation = Annotations.FirstOrDefault(annotation => !string.IsNullOrWhiteSpace(annotation.Record.SuggestedLabel));
+            var firstCreatedAnnotationId = convertedSuggestions.FirstOrDefault()?.Id;
+            SelectedAnnotation = firstCreatedAnnotationId is null
+                ? null
+                : Annotations.FirstOrDefault(annotation => annotation.Record.Id == firstCreatedAnnotationId);
         }
 
-        StatusMessage = $"{suggestions.Count} native suggestion(s) loaded for {Path.GetFileName(summary.ActiveImagePath)} via {summary.ProviderName}.";
+        if (shouldPublishImageStatus)
+        {
+            StatusMessage = $"{suggestions.Count} native detection(s) assigned to '{inferenceLabel.Name}' for {Path.GetFileName(summary.ActiveImagePath)} via {summary.ProviderName}.";
+        }
     }
 
     private void ResetInferenceBatchState(int totalImages = 0)
@@ -2170,10 +2826,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         OpenImagesCommand.RaiseCanExecuteChanged();
         AddImagesCommand.RaiseCanExecuteChanged();
+        NewProjectCommand.RaiseCanExecuteChanged();
         OpenProjectCommand.RaiseCanExecuteChanged();
+        SaveProjectCommand.RaiseCanExecuteChanged();
+        SaveProjectAsCommand.RaiseCanExecuteChanged();
         ImportAnnotationsCommand.RaiseCanExecuteChanged();
         ExportAnnotationsCommand.RaiseCanExecuteChanged();
+        RaiseInferenceCommandCanExecuteChanged();
+    }
+
+    private void RaiseInferenceCommandCanExecuteChanged()
+    {
         RunInferenceCommand.RaiseCanExecuteChanged();
+        RunActiveModelCommand.RaiseCanExecuteChanged();
     }
 
     private void UpdateInferenceRuntime(NativeInferenceResultSummary? summary)
@@ -2186,14 +2851,24 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        ActiveInferenceBackend = string.IsNullOrWhiteSpace(summary.BackendName) ? "Unavailable" : summary.BackendName;
-        ActiveInferenceProvider = string.IsNullOrWhiteSpace(summary.ProviderName) ? "N/A" : summary.ProviderName;
+        UpdateInferenceBackendIdentity(summary);
         ActiveInferenceRuntime = string.IsNullOrWhiteSpace(summary.StatusMessage)
             ? $"Backend {ActiveInferenceBackend} via {ActiveInferenceProvider}."
             : summary.StatusMessage;
     }
 
-    private static AnnotationRecord ConvertNativeSuggestion(NativeInferenceSuggestion suggestion)
+    private void UpdateInferenceBackendIdentity(NativeInferenceResultSummary? summary)
+    {
+        if (summary is null)
+        {
+            return;
+        }
+
+        ActiveInferenceBackend = string.IsNullOrWhiteSpace(summary.BackendName) ? "Unavailable" : summary.BackendName;
+        ActiveInferenceProvider = string.IsNullOrWhiteSpace(summary.ProviderName) ? "N/A" : summary.ProviderName;
+    }
+
+    private static AnnotationRecord ConvertNativeSuggestion(NativeInferenceSuggestion suggestion, LabelClass label)
     {
         return suggestion.Kind switch
         {
@@ -2201,17 +2876,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 Id = suggestion.Id,
                 Kind = AnnotationKind.Point,
+                LabelId = label.Id,
                 IsVisible = suggestion.IsVisible,
                 Point = new Point2D(suggestion.PointX, suggestion.PointY),
-                SuggestedLabel = string.IsNullOrWhiteSpace(suggestion.SuggestedLabel) ? null : suggestion.SuggestedLabel.Trim()
+                SuggestedLabel = label.Name,
+                SuggestedConfidence = suggestion.Confidence
             },
             _ => new AnnotationRecord
             {
                 Id = suggestion.Id,
                 Kind = AnnotationKind.Rect,
+                LabelId = label.Id,
                 IsVisible = suggestion.IsVisible,
                 Rect = new RectD(suggestion.RectX, suggestion.RectY, suggestion.RectWidth, suggestion.RectHeight),
-                SuggestedLabel = string.IsNullOrWhiteSpace(suggestion.SuggestedLabel) ? null : suggestion.SuggestedLabel.Trim()
+                SuggestedLabel = label.Name,
+                SuggestedConfidence = suggestion.Confidence
             }
         };
     }
@@ -2222,7 +2901,8 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         {
             LabelId = SelectedAnnotationLabel?.Id,
             IsVisible = SelectedAnnotationIsVisible,
-            SuggestedLabel = string.IsNullOrWhiteSpace(SelectedAnnotationSuggestedLabel) ? null : SelectedAnnotationSuggestedLabel.Trim()
+            SuggestedLabel = string.IsNullOrWhiteSpace(SelectedAnnotationSuggestedLabel) ? null : SelectedAnnotationSuggestedLabel.Trim(),
+            SuggestedConfidence = string.IsNullOrWhiteSpace(SelectedAnnotationSuggestedLabel) ? null : source.SuggestedConfidence
         };
 
         return source.Kind switch
@@ -2296,6 +2976,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private static string FormatNumber(double value)
     {
         return value.ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    private static double ToConfidencePercent(double confidence)
+    {
+        var percent = confidence <= 1.0 ? confidence * 100.0 : confidence;
+        return Math.Clamp(percent, 0.0, 100.0);
     }
 
     private static AnnotationKind MapTool(AnnotationTool tool)
@@ -2403,8 +3089,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             AnnotationFormat.Vgg => ".json",
             AnnotationFormat.Json => ".json",
             AnnotationFormat.Yolo => ".zip",
+            AnnotationFormat.YoloImageTxt => ".zip",
             AnnotationFormat.Voc => ".zip",
             _ => ".dat"
         };
     }
+
+    private sealed record InferenceBatchApplySummary(
+        int UpdatedImages,
+        int SuggestionCount,
+        int FailedImages,
+        NativeInferenceResultSummary? LatestSummary);
 }

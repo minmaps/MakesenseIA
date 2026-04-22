@@ -92,6 +92,13 @@ struct ms_inference_request
     const wchar_t* task_name;
 };
 
+struct ms_inference_batch_request
+{
+    const wchar_t* model_path;
+    const wchar_t* task_name;
+    const wchar_t* image_paths_blob;
+};
+
 struct ms_inference_result_summary
 {
     wchar_t active_image_path[260];
@@ -101,6 +108,18 @@ struct ms_inference_result_summary
     wchar_t provider_name[64];
     wchar_t status_message[256];
     std::uint32_t suggestion_count;
+    std::uint64_t generation;
+    ms_result_code result_code;
+};
+
+struct ms_inference_batch_status
+{
+    wchar_t status_message[256];
+    std::uint32_t completed_count;
+    std::uint32_t total_count;
+    std::uint32_t result_count;
+    std::uint8_t is_running;
+    std::uint8_t reserved[3];
     std::uint64_t generation;
     ms_result_code result_code;
 };
@@ -139,8 +158,12 @@ extern "C"
     MS_CORE_API ms_result_code ms_render(void* engine, const ms_render_frame_args* args);
     MS_CORE_API ms_result_code ms_set_view_transform(void* engine, const ms_view_transform* transform);
     MS_CORE_API ms_result_code ms_run_inference(void* engine, const ms_inference_request* request);
+    MS_CORE_API ms_result_code ms_run_inference_batch(void* engine, const ms_inference_batch_request* request);
     MS_CORE_API ms_result_code ms_get_latest_inference_summary(void* engine, ms_inference_result_summary* summary);
     MS_CORE_API ms_result_code ms_get_latest_inference_suggestion(void* engine, std::uint32_t index, ms_inference_suggestion* suggestion);
+    MS_CORE_API ms_result_code ms_get_inference_batch_status(void* engine, ms_inference_batch_status* status);
+    MS_CORE_API ms_result_code ms_get_inference_batch_result_summary(void* engine, std::uint32_t index, ms_inference_result_summary* summary);
+    MS_CORE_API ms_result_code ms_get_inference_batch_result_suggestion(void* engine, std::uint32_t result_index, std::uint32_t suggestion_index, ms_inference_suggestion* suggestion);
     MS_CORE_API ms_result_code ms_export_annotations(void* engine, const ms_export_request* request);
     MS_CORE_API void ms_shutdown(void* engine);
 }

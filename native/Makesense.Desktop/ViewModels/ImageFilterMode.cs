@@ -5,5 +5,7 @@ public enum ImageFilterMode
     All,
     CurrentToolPending,
     CurrentToolAnnotated,
-    WithSuggestions
+    WithSuggestions,
+    WithoutSuggestions,
+    WithoutAnnotations
 }

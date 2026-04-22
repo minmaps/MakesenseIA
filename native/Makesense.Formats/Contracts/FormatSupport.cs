@@ -16,7 +16,7 @@ public static class FormatSupport
     {
         return kind switch
         {
-            AnnotationKind.Rect => [AnnotationFormat.Yolo, AnnotationFormat.Voc, AnnotationFormat.Csv],
+            AnnotationKind.Rect => [AnnotationFormat.Yolo, AnnotationFormat.YoloImageTxt, AnnotationFormat.Voc, AnnotationFormat.Csv],
             AnnotationKind.Point => [AnnotationFormat.Csv],
             AnnotationKind.Line => [AnnotationFormat.Csv],
             AnnotationKind.Polygon => [AnnotationFormat.Vgg, AnnotationFormat.Coco],

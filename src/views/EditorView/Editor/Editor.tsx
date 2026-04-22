@@ -39,6 +39,7 @@ interface IProps {
     customCursorStyle: CustomCursorStyle;
     imageDragMode: boolean;
     zoom: number;
+    showAIConfidence: boolean;
 }
 
 interface IState {
@@ -213,6 +214,7 @@ class Editor extends React.Component<IProps, IState> {
                         position={positionOnViewPort}
                         labelData={labelRect}
                         imageData={this.props.imageData}
+                        showConfidence={this.props.showAIConfidence}
                         key={labelRect.id}
                     />
                 })
@@ -227,6 +229,7 @@ class Editor extends React.Component<IProps, IState> {
                         position={positionOnViewPort}
                         labelData={labelPoint}
                         imageData={this.props.imageData}
+                        showConfidence={this.props.showAIConfidence}
                         key={labelPoint.id}
                     />
                 })
@@ -300,7 +303,8 @@ const mapStateToProps = (state: AppState) => ({
     activeLabelId: state.labels.activeLabelId,
     customCursorStyle: state.general.customCursorStyle,
     imageDragMode: state.general.imageDragMode,
-    zoom: state.general.zoom
+    zoom: state.general.zoom,
+    showAIConfidence: state.general.showAIConfidence
 });
 
 export default connect(

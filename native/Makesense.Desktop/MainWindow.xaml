@@ -67,15 +67,33 @@
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="30" />
             <RowDefinition Height="5" />
             <RowDefinition Height="88" />
             <RowDefinition Height="*" />
             <RowDefinition Height="42" />
         </Grid.RowDefinitions>
 
-        <ProgressBar Grid.Row="0" Maximum="100" Value="{Binding ProjectProgressPercent, Mode=OneWay}" />
+        <Menu Grid.Row="0" Background="{StaticResource ChromeBrush}" Foreground="{StaticResource TextPrimaryBrush}" Padding="12,0">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New Project" Command="{Binding NewProjectCommand}" InputGestureText="Ctrl+N" />
+                <MenuItem Header="_Open Project..." Command="{Binding OpenProjectCommand}" InputGestureText="Ctrl+O" />
+                <Separator />
+                <MenuItem Header="_Save" Command="{Binding SaveProjectCommand}" InputGestureText="Ctrl+S" />
+                <MenuItem Header="Save _As..." Command="{Binding SaveProjectAsCommand}" InputGestureText="Ctrl+Shift+S" />
+                <Separator />
+                <MenuItem Header="Open _Images..." Command="{Binding OpenImagesCommand}" />
+                <MenuItem Header="_Add Images..." Command="{Binding AddImagesCommand}" />
+                <Separator />
+                <MenuItem Header="_Import Annotations..." Command="{Binding ImportAnnotationsCommand}" />
+                <MenuItem Header="_Export Annotations..." Command="{Binding ExportAnnotationsCommand}" />
+                <MenuItem Header="Export _Manifest..." Command="{Binding ExportManifestCommand}" />
+            </MenuItem>
+        </Menu>
 
-        <Border Grid.Row="1" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,14">
+        <ProgressBar Grid.Row="1" Maximum="100" Value="{Binding ProjectProgressPercent, Mode=OneWay}" />
+
+        <Border Grid.Row="2" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="20,14">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,18,0">
                     <Border Width="18" Height="18" Background="{StaticResource AccentBrush}" CornerRadius="5" Margin="0,0,10,0" />
@@ -101,7 +119,7 @@
                 <WrapPanel VerticalAlignment="Center" Margin="24,0,0,0">
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open" Command="{Binding OpenImagesCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Add" Command="{Binding AddImagesCommand}" />
-                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Project" Command="{Binding OpenProjectCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open Project" Command="{Binding OpenProjectCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Import" Command="{Binding ImportAnnotationsCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Export" Command="{Binding ExportAnnotationsCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Manifest" Command="{Binding ExportManifestCommand}" />
@@ -111,7 +129,7 @@
             </DockPanel>
         </Border>
 
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="420" />
                 <ColumnDefinition Width="*" />
@@ -144,6 +162,35 @@
                             <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Recherche et statut" />
                             <TextBox Margin="0,8,0,8" Text="{Binding ImageSearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <ComboBox Margin="0,0,0,10" ItemsSource="{Binding AvailableImageFilters}" SelectedItem="{Binding SelectedImageFilter, Mode=TwoWay}" />
+                            <CheckBox Margin="0,0,0,10" Content="Show confidence" IsChecked="{Binding ShowConfidence, Mode=TwoWay}" />
+                            <DockPanel Margin="0,0,0,4">
+                                <TextBlock DockPanel.Dock="Left" Style="{StaticResource CaptionTextStyle}" Text="Confiance suggestions" />
+                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource CaptionTextStyle}" Text="{Binding SuggestionConfidenceRangeLabel}" />
+                            </DockPanel>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="42" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="Min" />
+                                <Slider Grid.Row="0" Grid.Column="1"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Value="{Binding MinimumSuggestionConfidence, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="Max" />
+                                <Slider Grid.Row="1" Grid.Column="1"
+                                        Minimum="0"
+                                        Maximum="100"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Value="{Binding MaximumSuggestionConfidence, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </Grid>
                             <WrapPanel Margin="0,0,0,10">
                                 <Border Style="{StaticResource MetricCardStyle}">
                                     <StackPanel>
@@ -272,7 +319,10 @@
                         </Border>
                         <StackPanel Grid.Column="2" Margin="16,0">
                             <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Modèle actif" />
-                            <TextBox Margin="0,8,0,0" Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                            <DockPanel Margin="0,8,0,0">
+                                <Button DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource CompactButtonStyle}" Content="Run" Command="{Binding RunActiveModelCommand}" />
+                                <TextBox Text="{Binding ActiveModelPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            </DockPanel>
                             <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="Image active" />
                             <TextBlock Margin="0,4,0,0" Text="{Binding SelectedImageSummary}" TextWrapping="Wrap" />
                             <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="{Binding ActiveInferenceRuntime}" TextWrapping="Wrap" />
@@ -293,6 +343,7 @@
                                                        Zoom="{Binding ViewZoom}"
                                                        PanOffsetX="{Binding PanOffsetX}"
                                                        PanOffsetY="{Binding PanOffsetY}"
+                                                       ShowConfidence="{Binding ShowConfidence}"
                                                        Panel.ZIndex="2" />
                         <Border HorizontalAlignment="Center" VerticalAlignment="Center" Padding="26" Background="#F2131E2F" BorderBrush="#37557A" BorderThickness="1" CornerRadius="22" Visibility="{Binding HasFilteredImages, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                             <StackPanel HorizontalAlignment="Center">
@@ -326,7 +377,10 @@
                                     </Border>
                                 </WrapPanel>
                                 <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Active model" />
-                                <TextBox Text="{Binding ActiveModelPath, Mode=TwoWay}" />
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource CompactButtonStyle}" Content="Run" Command="{Binding RunActiveModelCommand}" />
+                                    <TextBox Text="{Binding ActiveModelPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                </DockPanel>
                                 <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionTextStyle}" Text="Backend runtime" />
                                 <TextBlock FontWeight="SemiBold" Text="{Binding ActiveInferenceBackend}" />
                                 <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding ActiveInferenceProvider}" />
@@ -393,28 +447,57 @@
                         </Border>
                         <TextBlock Style="{StaticResource HeaderTextStyle}" Margin="0,14,0,8" Text="Performance" />
                         <Border Style="{StaticResource SectionSurfaceStyle}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max RAM (MB)" />
-                                    <TextBox Text="{Binding Performance.MaxRamMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Decode threads" />
-                                    <TextBox Text="{Binding Performance.MaxDecodeThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Inference jobs" />
-                                    <TextBox Text="{Binding Performance.MaxInferenceJobs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max VRAM (MB)" />
-                                    <TextBox Text="{Binding Performance.MaxVramMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="I/O threads" />
-                                    <TextBox Text="{Binding Performance.MaxIoThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Prefetch images" />
-                                    <TextBox Text="{Binding Performance.MaxPrefetchImages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                </StackPanel>
-                            </Grid>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource CaptionTextStyle}" Text="{Binding PerformanceMonitor.StatusText}" />
+                                <UniformGrid Columns="2" Margin="0,8,0,12">
+                                    <Border Style="{StaticResource MetricCardStyle}" Margin="0,0,8,8">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="RAM process" />
+                                            <TextBlock FontSize="21" FontWeight="Bold" Text="{Binding PerformanceMonitor.RamUsedMb, Mode=OneWay, StringFormat={}{0:0} MB}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource MetricCardStyle}" Margin="8,0,0,8">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="VRAM process" />
+                                            <TextBlock FontSize="21" FontWeight="Bold" Text="{Binding PerformanceMonitor.VramUsedMb, Mode=OneWay, StringFormat={}{0:0} MB}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource MetricCardStyle}" Margin="0,0,8,0">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="CPU process" />
+                                            <TextBlock FontSize="21" FontWeight="Bold" Text="{Binding PerformanceMonitor.CpuUsagePercent, Mode=OneWay, StringFormat={}{0:0}%}" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource MetricCardStyle}" Margin="8,0,0,0">
+                                        <StackPanel>
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="GPU process" />
+                                            <TextBlock FontSize="21" FontWeight="Bold" Text="{Binding PerformanceMonitor.GpuUsagePercent, Mode=OneWay, StringFormat={}{0:0}%}" />
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,8,0">
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max RAM (MB)" />
+                                        <TextBox Text="{Binding Performance.MaxRamMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Decode threads" />
+                                        <TextBox Text="{Binding Performance.MaxDecodeThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Inference jobs" />
+                                        <TextBox Text="{Binding Performance.MaxInferenceJobs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max VRAM (MB)" />
+                                        <TextBox Text="{Binding Performance.MaxVramMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="I/O threads" />
+                                        <TextBox Text="{Binding Performance.MaxIoThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Prefetch images" />
+                                        <TextBox Text="{Binding Performance.MaxPrefetchImages, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
                         </Border>
                         <TextBlock Style="{StaticResource HeaderTextStyle}" Margin="0,14,0,8" Text="Notifications" />
                         <Border Style="{StaticResource SectionSurfaceStyle}">
@@ -439,7 +522,7 @@
             </Border>
         </Grid>
 
-        <Border Grid.Row="3" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+        <Border Grid.Row="4" Background="{StaticResource ChromeBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="{Binding ProjectPath}" />
                 <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Style="{StaticResource CaptionTextStyle}" Text="{Binding SelectedImageSummary}" />
@@ -448,7 +531,7 @@
         </Border>
 
         <controls:NativeRenderHost x:Name="RenderHost"
-                                   Grid.RowSpan="4"
+                                   Grid.RowSpan="5"
                                    Width="1"
                                    Height="1"
                                    HorizontalAlignment="Right"
@@ -457,11 +540,11 @@
                                    IsHitTestVisible="False"
                                    Opacity="0.01" />
 
-        <Border Grid.RowSpan="4"
+        <Border Grid.RowSpan="5"
                 Width="560"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
-                Margin="0,104,0,0"
+                Margin="0,134,0,0"
                 Padding="16,12"
                 Background="#F2131E2F"
                 BorderBrush="{StaticResource BorderStrongBrush}"
@@ -485,7 +568,7 @@
             </Grid>
         </Border>
 
-        <Border Grid.RowSpan="4" Background="#94040A14" Visibility="{Binding IsDialogOpen, Converter={StaticResource BooleanToVisibilityConverter}}" Panel.ZIndex="40">
+        <Border Grid.RowSpan="5" Background="#94040A14" Visibility="{Binding IsDialogOpen, Converter={StaticResource BooleanToVisibilityConverter}}" Panel.ZIndex="40">
             <Grid>
                 <Border Width="640" MaxWidth="700" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="24" Background="{StaticResource PanelBackgroundBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" CornerRadius="24">
                     <DockPanel>

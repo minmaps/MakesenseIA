@@ -154,6 +154,19 @@ extern "C" MS_CORE_API ms_result_code ms_run_inference(void* engine, const ms_in
     });
 }
 
+extern "C" MS_CORE_API ms_result_code ms_run_inference_batch(void* engine, const ms_inference_batch_request* request)
+{
+    if (engine == nullptr || request == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_result([&]
+    {
+        return as_engine(engine)->run_inference_batch(*request);
+    });
+}
+
 extern "C" MS_CORE_API ms_result_code ms_get_latest_inference_summary(void* engine, ms_inference_result_summary* summary)
 {
     if (engine == nullptr || summary == nullptr)
@@ -177,6 +190,45 @@ extern "C" MS_CORE_API ms_result_code ms_get_latest_inference_suggestion(void* e
     return guard_result([&]
     {
         return as_engine(engine)->get_latest_inference_suggestion(index, suggestion);
+    });
+}
+
+extern "C" MS_CORE_API ms_result_code ms_get_inference_batch_status(void* engine, ms_inference_batch_status* status)
+{
+    if (engine == nullptr || status == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_result([&]
+    {
+        return as_engine(engine)->get_inference_batch_status(status);
+    });
+}
+
+extern "C" MS_CORE_API ms_result_code ms_get_inference_batch_result_summary(void* engine, std::uint32_t index, ms_inference_result_summary* summary)
+{
+    if (engine == nullptr || summary == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_result([&]
+    {
+        return as_engine(engine)->get_inference_batch_result_summary(index, summary);
+    });
+}
+
+extern "C" MS_CORE_API ms_result_code ms_get_inference_batch_result_suggestion(void* engine, std::uint32_t result_index, std::uint32_t suggestion_index, ms_inference_suggestion* suggestion)
+{
+    if (engine == nullptr || suggestion == nullptr)
+    {
+        return MS_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_result([&]
+    {
+        return as_engine(engine)->get_inference_batch_result_suggestion(result_index, suggestion_index, suggestion);
     });
 }
 

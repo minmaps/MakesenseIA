@@ -12,6 +12,7 @@ const initialState: GeneralState = {
     imageDragMode: false,
     crossHairVisible: true,
     enablePerClassColoration: true,
+    showAIConfidence: false,
     projectData: {
         type: null,
         name: 'my-project-name',
@@ -82,6 +83,12 @@ export function generalReducer(
             return {
                 ...state,
                 enablePerClassColoration: action.payload.enablePerClassColoration
+            }
+        }
+        case Action.UPDATE_SHOW_AI_CONFIDENCE_STATUS: {
+            return {
+                ...state,
+                showAIConfidence: action.payload.showAIConfidence
             }
         }
         default:

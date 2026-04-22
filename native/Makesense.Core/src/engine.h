@@ -19,6 +19,19 @@
 #include <string>
 #include <vector>
 
+struct stored_inference_result
+{
+    std::uint64_t generation{0};
+    std::wstring active_image_path;
+    std::wstring model_path;
+    std::wstring task_name;
+    std::wstring backend_name;
+    std::wstring provider_name;
+    std::wstring status_message;
+    ms_result_code result_code{MS_RESULT_NOT_FOUND};
+    std::vector<native_inference_suggestion> suggestions;
+};
+
 class native_engine
 {
 public:
@@ -33,8 +46,12 @@ public:
     ms_result_code render(const ms_render_frame_args& args);
     ms_result_code set_view_transform(const ms_view_transform& transform);
     ms_result_code run_inference(const ms_inference_request& request);
+    ms_result_code run_inference_batch(const ms_inference_batch_request& request);
     ms_result_code get_latest_inference_summary(ms_inference_result_summary* summary) const;
     ms_result_code get_latest_inference_suggestion(std::uint32_t index, ms_inference_suggestion* suggestion) const;
+    ms_result_code get_inference_batch_status(ms_inference_batch_status* status) const;
+    ms_result_code get_inference_batch_result_summary(std::uint32_t index, ms_inference_result_summary* summary) const;
+    ms_result_code get_inference_batch_result_suggestion(std::uint32_t result_index, std::uint32_t suggestion_index, ms_inference_suggestion* suggestion) const;
     ms_result_code export_annotations(const ms_export_request& request);
 
 private:
@@ -48,6 +65,13 @@ private:
     void reconfigure_workers();
     void probe_runtime_support();
     void clear_latest_inference_result_locked();
+    void clear_batch_inference_locked();
+    void store_inference_summary(
+        ms_inference_result_summary* summary,
+        const stored_inference_result& source) const;
+    void copy_inference_suggestion(
+        ms_inference_suggestion* suggestion,
+        const native_inference_suggestion& source) const;
     void store_latest_inference_result_locked(
         std::uint64_t generation,
         const std::wstring& image_path,
@@ -91,6 +115,12 @@ private:
     std::wstring latest_inference_status_message_;
     ms_result_code latest_inference_result_code_{MS_RESULT_NOT_FOUND};
     std::vector<native_inference_suggestion> latest_inference_suggestions_;
+    std::uint64_t batch_inference_generation_{0};
+    std::uint32_t batch_inference_completed_{0};
+    bool batch_inference_running_{false};
+    ms_result_code batch_inference_result_code_{MS_RESULT_NOT_FOUND};
+    std::wstring batch_inference_status_message_;
+    std::vector<stored_inference_result> batch_inference_results_;
 
     budgeted_lru ram_cache_;
     budgeted_lru vram_cache_;

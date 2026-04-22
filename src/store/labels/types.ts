@@ -16,6 +16,7 @@ export type LabelRect = Annotation & {
     isCreatedByAI: boolean;
     status: LabelStatus;
     suggestedLabel: string;
+    confidence?: number;
 }
 
 export type LabelPoint = Annotation & {
@@ -23,6 +24,7 @@ export type LabelPoint = Annotation & {
     isCreatedByAI: boolean;
     status: LabelStatus;
     suggestedLabel: string;
+    confidence?: number;
 }
 
 export type LabelPolygon = Annotation & {

@@ -8,7 +8,7 @@ import { ISize } from "../../../../interfaces/ISize";
 import { ImageRepository } from "../../../../logic/imageRepository/ImageRepository";
 import { AppState } from "../../../../store";
 import { updateImageDataById } from "../../../../store/labels/actionCreators";
-import { ImageData } from "../../../../store/labels/types";
+import { ImageData, LabelPoint, LabelRect } from "../../../../store/labels/types";
 import { FileUtil } from "../../../../utils/FileUtil";
 import { RectUtil } from "../../../../utils/RectUtil";
 import './ImagePreview.scss';
@@ -20,6 +20,7 @@ interface IProps {
     size: ISize;
     isScrolling?: boolean;
     isChecked?: boolean;
+    showConfidence?: boolean;
     onClick?: () => any;
     isSelected?: boolean;
     updateImageDataById: (id: string, newImageData: ImageData) => any;
@@ -71,6 +72,7 @@ class ImagePreview extends React.Component<IProps, IState> {
             this.state.image !== nextState.image ||
             this.props.isSelected !== nextProps.isSelected ||
             this.props.isChecked !== nextProps.isChecked ||
+            this.props.showConfidence !== nextProps.showConfidence ||
             this.props.isScrolling !== nextProps.isScrolling
         )
     }
@@ -162,12 +164,34 @@ class ImagePreview extends React.Component<IProps, IState> {
         );
     };
 
+    private getBestConfidenceLabel = (): string | null => {
+        const values = this.props.imageData.labelRects
+            .filter((labelRect: LabelRect) => labelRect.isCreatedByAI && labelRect.confidence !== undefined)
+            .map((labelRect: LabelRect) => this.toConfidencePercent(labelRect.confidence))
+            .concat(this.props.imageData.labelPoints
+                .filter((labelPoint: LabelPoint) => labelPoint.isCreatedByAI && labelPoint.confidence !== undefined)
+                .map((labelPoint: LabelPoint) => this.toConfidencePercent(labelPoint.confidence)));
+
+        if (values.length === 0) {
+            return null;
+        }
+
+        return `${Math.max(...values).toFixed(0)}%`;
+    };
+
+    private toConfidencePercent = (confidence: number): number => {
+        const percent = confidence <= 1 ? confidence * 100 : confidence;
+        return Math.min(100, Math.max(0, percent));
+    };
+
     public render() {
         const {
             isChecked,
+            showConfidence,
             style,
             onClick
         } = this.props;
+        const confidenceLabel = showConfidence ? this.getBestConfidenceLabel() : null;
 
         return (
             <div
@@ -195,6 +219,7 @@ class ImagePreview extends React.Component<IProps, IState> {
                                 src={"ico/ok.png"}
                                 alt={"checkbox"}
                             />}
+                            {confidenceLabel && <div className="ConfidenceBadge">{confidenceLabel}</div>}
                         </div>,
                         <div
                             className="Background"

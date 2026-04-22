@@ -29,9 +29,14 @@ public sealed class ExportAnnotationsDialogViewModel : ModalDialogViewModel
         _confirmAction = confirmAction;
         BrowseDestinationCommand = new RelayCommand(BrowseDestination);
         ConfirmCommand = new RelayCommand(Confirm, CanConfirm);
+        AvailableFormatOptions = availableFormats
+            .Select(format => new AnnotationFormatOption(format, GetDisplayName(format)))
+            .ToArray();
     }
 
     public IReadOnlyList<AnnotationFormat> AvailableFormats { get; }
+
+    public IReadOnlyList<AnnotationFormatOption> AvailableFormatOptions { get; }
 
     public RelayCommand BrowseDestinationCommand { get; }
 
@@ -92,8 +97,26 @@ public sealed class ExportAnnotationsDialogViewModel : ModalDialogViewModel
             AnnotationFormat.Vgg => ".json",
             AnnotationFormat.Json => ".json",
             AnnotationFormat.Yolo => ".zip",
+            AnnotationFormat.YoloImageTxt => ".zip",
             AnnotationFormat.Voc => ".zip",
             _ => ".json"
         };
     }
+
+    private static string GetDisplayName(AnnotationFormat format)
+    {
+        return format switch
+        {
+            AnnotationFormat.Yolo => "YOLO package",
+            AnnotationFormat.YoloImageTxt => "YOLO image .txt files",
+            AnnotationFormat.Voc => "VOC XML package",
+            AnnotationFormat.Csv => "CSV file",
+            AnnotationFormat.Coco => "COCO JSON file",
+            AnnotationFormat.Vgg => "VGG JSON file",
+            AnnotationFormat.Json => "JSON file",
+            _ => format.ToString()
+        };
+    }
 }
+
+public sealed record AnnotationFormatOption(AnnotationFormat Format, string DisplayName);

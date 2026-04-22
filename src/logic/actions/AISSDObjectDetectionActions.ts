@@ -3,16 +3,14 @@ import {ImageData, LabelName, LabelRect} from '../../store/labels/types';
 import {LabelsSelector} from '../../store/selectors/LabelsSelector';
 import { v4 as uuidv4 } from 'uuid';
 import {store} from '../../index';
-import {updateImageDataById} from '../../store/labels/actionCreators';
+import {updateActiveLabelNameId, updateImageDataById} from '../../store/labels/actionCreators';
 import {SSDObjectDetector} from '../../ai/SSDObjectDetector';
 import {ImageRepository} from '../imageRepository/ImageRepository';
 import {LabelStatus} from '../../data/enums/LabelStatus';
 import {findLast} from 'lodash';
-import {updateSuggestedLabelList} from '../../store/ai/actionCreators';
 import {PopupWindowType} from '../../data/enums/PopupWindowType';
 import {updateActivePopupType} from '../../store/general/actionCreators';
 import {AISelector} from '../../store/selectors/AISelector';
-import {AIActions} from './AIActions';
 
 export class AISSDObjectDetectionActions {
     public static detectRectsForActiveImage(): void {
@@ -27,23 +25,16 @@ export class AISSDObjectDetectionActions {
 
         store.dispatch(updateActivePopupType(PopupWindowType.LOADER));
         SSDObjectDetector.predict(image, (predictions: DetectedObject[]) => {
-            const suggestedLabelNames = AISSDObjectDetectionActions
-                .extractNewSuggestedLabelNames(LabelsSelector.getLabelNames(), predictions);
-            const rejectedLabelNames = AISelector.getRejectedSuggestedLabelList();
-            const newlySuggestedNames = AIActions.excludeRejectedLabelNames(suggestedLabelNames, rejectedLabelNames);
-            if (newlySuggestedNames.length > 0) {
-                store.dispatch(updateSuggestedLabelList(newlySuggestedNames));
-                store.dispatch(updateActivePopupType(PopupWindowType.SUGGEST_LABEL_NAMES));
-            } else {
-                store.dispatch(updateActivePopupType(null));
-            }
-            AISSDObjectDetectionActions.saveRectPredictions(imageId, predictions);
+            const detectionLabelId = AISSDObjectDetectionActions.resolveDetectionLabelId();
+            store.dispatch(updateActivePopupType(null));
+            if (!detectionLabelId) return;
+            AISSDObjectDetectionActions.saveRectPredictions(imageId, predictions, detectionLabelId);
         })
     }
 
-    public static saveRectPredictions(imageId: string, predictions: DetectedObject[]) {
+    public static saveRectPredictions(imageId: string, predictions: DetectedObject[], labelId: string) {
         const imageData: ImageData = LabelsSelector.getImageDataById(imageId);
-        const predictedLabels: LabelRect[] = AISSDObjectDetectionActions.mapPredictionsToRectLabels(predictions);
+        const predictedLabels: LabelRect[] = AISSDObjectDetectionActions.mapPredictionsToRectLabels(predictions, labelId);
         const nextImageData: ImageData = {
             ...imageData,
             labelRects: imageData.labelRects.concat(predictedLabels),
@@ -52,12 +43,12 @@ export class AISSDObjectDetectionActions {
         store.dispatch(updateImageDataById(imageData.id, nextImageData));
     }
 
-    private static mapPredictionsToRectLabels(predictions: DetectedObject[]): LabelRect[] {
+    private static mapPredictionsToRectLabels(predictions: DetectedObject[], labelId: string): LabelRect[] {
         return predictions.map((prediction: DetectedObject) => {
             return {
                 id: uuidv4(),
                 labelIndex: null,
-                labelId: null,
+                labelId,
                 rect: {
                     x: prediction.bbox[0],
                     y: prediction.bbox[1],
@@ -66,10 +57,27 @@ export class AISSDObjectDetectionActions {
                 },
                 isVisible: true,
                 isCreatedByAI: true,
-                status: LabelStatus.UNDECIDED,
-                suggestedLabel: prediction.class
+                status: LabelStatus.ACCEPTED,
+                suggestedLabel: '',
+                confidence: prediction.score
             }
         })
+    }
+
+    private static resolveDetectionLabelId(): string | null {
+        const activeLabelNameId = LabelsSelector.getActiveLabelNameId();
+        const labelNames = LabelsSelector.getLabelNames();
+        if (!!activeLabelNameId && !!findLast(labelNames, {id: activeLabelNameId})) {
+            return activeLabelNameId;
+        }
+
+        const firstLabel = labelNames[0];
+        if (!firstLabel) {
+            return null;
+        }
+
+        store.dispatch(updateActiveLabelNameId(firstLabel.id));
+        return firstLabel.id;
     }
 
     public static extractNewSuggestedLabelNames(labels: LabelName[], predictions: DetectedObject[]): string[] {

@@ -4,24 +4,27 @@ namespace Makesense.Desktop.ViewModels;
 
 public sealed class AnnotationItemViewModel
 {
-    public AnnotationItemViewModel(AnnotationRecord record, IReadOnlyDictionary<string, string> labelNames)
+    public AnnotationItemViewModel(AnnotationRecord record, IReadOnlyDictionary<string, string> labelNames, bool showConfidence)
     {
         Record = record;
-        Summary = BuildSummary(record, labelNames);
+        Summary = BuildSummary(record, labelNames, showConfidence);
     }
 
     public AnnotationRecord Record { get; }
 
     public string Summary { get; }
 
-    private static string BuildSummary(AnnotationRecord record, IReadOnlyDictionary<string, string> labelNames)
+    private static string BuildSummary(AnnotationRecord record, IReadOnlyDictionary<string, string> labelNames, bool showConfidence)
     {
         var label = record.LabelId is not null && labelNames.TryGetValue(record.LabelId, out var name)
             ? name
             : "unlabeled";
+        var confidenceSuffix = showConfidence && record.SuggestedConfidence is double confidence
+            ? $" ({ToConfidencePercent(confidence):0}%)"
+            : string.Empty;
         var suggestionPrefix = string.IsNullOrWhiteSpace(record.SuggestedLabel)
             ? string.Empty
-            : $"Suggested:{record.SuggestedLabel} | ";
+            : $"Suggested:{record.SuggestedLabel}{confidenceSuffix} | ";
 
         return record.Kind switch
         {
@@ -37,5 +40,11 @@ public sealed class AnnotationItemViewModel
                 $"{suggestionPrefix}Image label [{label}]",
             _ => $"{suggestionPrefix}{record.Kind} [{label}]"
         };
+    }
+
+    private static double ToConfidencePercent(double confidence)
+    {
+        var percent = confidence <= 1.0 ? confidence * 100.0 : confidence;
+        return Math.Clamp(percent, 0.0, 100.0);
     }
 }

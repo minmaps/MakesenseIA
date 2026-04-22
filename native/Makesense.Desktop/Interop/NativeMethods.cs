@@ -105,6 +105,19 @@ internal struct MsInferenceRequest
 }
 
 [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+internal struct MsInferenceBatchRequest
+{
+    [MarshalAs(UnmanagedType.LPWStr)]
+    public string ModelPath;
+
+    [MarshalAs(UnmanagedType.LPWStr)]
+    public string TaskName;
+
+    [MarshalAs(UnmanagedType.LPWStr)]
+    public string ImagePathsBlob;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
 internal struct MsInferenceResultSummary
 {
     [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
@@ -126,6 +139,23 @@ internal struct MsInferenceResultSummary
     public string StatusMessage;
 
     public uint SuggestionCount;
+    public ulong Generation;
+    public MsInferenceResultCode ResultCode;
+}
+
+[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+internal struct MsInferenceBatchStatus
+{
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+    public string StatusMessage;
+
+    public uint CompletedCount;
+    public uint TotalCount;
+    public uint ResultCount;
+    public byte IsRunning;
+    public byte Reserved0;
+    public byte Reserved1;
+    public byte Reserved2;
     public ulong Generation;
     public MsInferenceResultCode ResultCode;
 }
@@ -198,11 +228,23 @@ internal static class NativeMethods
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern MsResultCode ms_run_inference(nint engine, in MsInferenceRequest request);
 
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern MsResultCode ms_run_inference_batch(nint engine, in MsInferenceBatchRequest request);
+
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     internal static extern MsResultCode ms_get_latest_inference_summary(nint engine, out MsInferenceResultSummary summary);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
     internal static extern MsResultCode ms_get_latest_inference_suggestion(nint engine, uint index, out MsInferenceSuggestion suggestion);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    internal static extern MsResultCode ms_get_inference_batch_status(nint engine, out MsInferenceBatchStatus status);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    internal static extern MsResultCode ms_get_inference_batch_result_summary(nint engine, uint index, out MsInferenceResultSummary summary);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Unicode)]
+    internal static extern MsResultCode ms_get_inference_batch_result_suggestion(nint engine, uint resultIndex, uint suggestionIndex, out MsInferenceSuggestion suggestion);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern MsResultCode ms_export_annotations(nint engine, in MsExportRequest request);

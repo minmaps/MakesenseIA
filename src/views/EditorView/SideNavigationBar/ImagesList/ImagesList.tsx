@@ -14,16 +14,29 @@ import {EventType} from "../../../../data/enums/EventType";
 import {LabelStatus} from "../../../../data/enums/LabelStatus";
 import {UnderlineTextButton} from "../../../Common/UnderlineTextButton/UnderlineTextButton";
 import {AIActions} from "../../../../logic/actions/AIActions";
+import {updateShowAIConfidenceStatus} from "../../../../store/general/actionCreators";
+
+enum ImageFilterMode {
+    ALL = 'all',
+    WITH_ANNOTATIONS = 'withAnnotations',
+    WITH_SUGGESTIONS = 'withSuggestions',
+    WITHOUT_SUGGESTIONS = 'withoutSuggestions',
+    WITHOUT_ANNOTATIONS = 'withoutAnnotations'
+}
 
 interface IProps {
     activeImageIndex: number;
     imagesData: ImageData[];
     activeLabelType: LabelType;
+    showAIConfidence: boolean;
+    updateShowAIConfidenceStatus: (showAIConfidence: boolean) => any;
 }
 
 interface IState {
     size: ISize;
-    showDetectionsOnly: boolean;
+    filterMode: ImageFilterMode;
+    minConfidence: number;
+    maxConfidence: number;
 }
 
 class ImagesList extends React.Component<IProps, IState> {
@@ -34,7 +47,9 @@ class ImagesList extends React.Component<IProps, IState> {
 
         this.state = {
             size: null,
-            showDetectionsOnly: false,
+            filterMode: ImageFilterMode.ALL,
+            minConfidence: 0,
+            maxConfidence: 100,
         }
     }
 
@@ -81,18 +96,41 @@ class ImagesList extends React.Component<IProps, IState> {
     };
 
     private hasDetections = (imageData: ImageData): boolean => {
+        return this.hasActiveToolAnnotations(imageData);
+    };
+
+    private hasActiveToolAnnotations = (imageData: ImageData): boolean => {
         switch (this.props.activeLabelType) {
             case LabelType.LINE:
                 return imageData.labelLines.length > 0;
             case LabelType.IMAGE_RECOGNITION:
                 return imageData.labelNameIds.length > 0;
             case LabelType.POINT:
-                return imageData.labelPoints.length > 0;
+                return imageData.labelPoints.some((labelPoint: LabelPoint) =>
+                    labelPoint.status === LabelStatus.ACCEPTED);
             case LabelType.POLYGON:
                 return imageData.labelPolygons.length > 0;
             case LabelType.RECT:
-                return imageData.labelRects.length > 0;
+                return imageData.labelRects.some((labelRect: LabelRect) =>
+                    labelRect.status === LabelStatus.ACCEPTED);
         }
+    };
+
+    private hasAnnotations = (imageData: ImageData): boolean => {
+        return imageData.labelLines.length > 0 ||
+            imageData.labelNameIds.length > 0 ||
+            imageData.labelPolygons.length > 0 ||
+            imageData.labelRects.some((labelRect: LabelRect) => labelRect.status === LabelStatus.ACCEPTED) ||
+            imageData.labelPoints.some((labelPoint: LabelPoint) => labelPoint.status === LabelStatus.ACCEPTED);
+    };
+
+    private hasSuggestions = (imageData: ImageData): boolean => {
+        return imageData.labelRects.some((labelRect: LabelRect) => this.isSuggestedLabel(labelRect)) ||
+            imageData.labelPoints.some((labelPoint: LabelPoint) => this.isSuggestedLabel(labelPoint));
+    };
+
+    private isSuggestedLabel = (label: LabelRect | LabelPoint): boolean => {
+        return label.isCreatedByAI && label.status !== LabelStatus.ACCEPTED;
     };
 
     private onClickHandler = (index: number) => {
@@ -102,11 +140,7 @@ class ImagesList extends React.Component<IProps, IState> {
     private getVisibleImageIndexes = (): number[] => {
         const allIndexes = this.props.imagesData.map((imageData: ImageData, index: number) => index);
 
-        if (!this.state.showDetectionsOnly) {
-            return allIndexes;
-        }
-
-        return allIndexes.filter((index: number) => this.hasDetections(this.props.imagesData[index]));
+        return allIndexes.filter((index: number) => this.matchesFilters(this.props.imagesData[index]));
     };
 
     private getDetectedImageIndexes = (): number[] => {
@@ -132,10 +166,70 @@ class ImagesList extends React.Component<IProps, IState> {
         return this.props.imagesData.filter((imageData: ImageData) => this.hasPendingDetections(imageData)).length;
     };
 
-    private toggleDetectionsOnly = () => {
-        this.setState((state: IState) => ({
-            showDetectionsOnly: !state.showDetectionsOnly
-        }), this.updateListSize);
+    private matchesFilters = (imageData: ImageData): boolean => {
+        const matchesMode = (() => {
+            switch (this.state.filterMode) {
+                case ImageFilterMode.WITH_ANNOTATIONS:
+                    return this.hasActiveToolAnnotations(imageData);
+                case ImageFilterMode.WITH_SUGGESTIONS:
+                    return this.hasSuggestions(imageData);
+                case ImageFilterMode.WITHOUT_SUGGESTIONS:
+                    return !this.hasSuggestions(imageData);
+                case ImageFilterMode.WITHOUT_ANNOTATIONS:
+                    return !this.hasAnnotations(imageData);
+                default:
+                    return true;
+            }
+        })();
+
+        return matchesMode && this.matchesConfidenceRange(imageData);
+    };
+
+    private matchesConfidenceRange = (imageData: ImageData): boolean => {
+        if (!this.isConfidenceRangeActive() ||
+            this.state.filterMode === ImageFilterMode.WITHOUT_SUGGESTIONS ||
+            this.state.filterMode === ImageFilterMode.WITHOUT_ANNOTATIONS) {
+            return true;
+        }
+
+        const confidenceValues = imageData.labelRects
+            .filter((labelRect: LabelRect) => labelRect.isCreatedByAI && labelRect.confidence !== undefined)
+            .map((labelRect: LabelRect) => this.toConfidencePercent(labelRect.confidence))
+            .concat(imageData.labelPoints
+                .filter((labelPoint: LabelPoint) => labelPoint.isCreatedByAI && labelPoint.confidence !== undefined)
+                .map((labelPoint: LabelPoint) => this.toConfidencePercent(labelPoint.confidence)));
+
+        return confidenceValues.some((confidence: number) =>
+            confidence >= this.state.minConfidence && confidence <= this.state.maxConfidence);
+    };
+
+    private isConfidenceRangeActive = (): boolean => {
+        return this.state.minConfidence > 0 || this.state.maxConfidence < 100;
+    };
+
+    private toConfidencePercent = (confidence: number): number => {
+        const percent = confidence <= 1 ? confidence * 100 : confidence;
+        return Math.min(100, Math.max(0, percent));
+    };
+
+    private onFilterModeChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        this.setState({
+            filterMode: event.target.value as ImageFilterMode
+        }, this.updateListSize);
+    };
+
+    private onMinimumConfidenceChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const minConfidence = Math.min(Number(event.target.value), this.state.maxConfidence);
+        this.setState({minConfidence}, this.updateListSize);
+    };
+
+    private onMaximumConfidenceChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const maxConfidence = Math.max(Number(event.target.value), this.state.minConfidence);
+        this.setState({maxConfidence}, this.updateListSize);
+    };
+
+    private onShowConfidenceChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        this.props.updateShowAIConfidenceStatus(event.target.checked);
     };
 
     private validateAllImages = () => {
@@ -152,6 +246,7 @@ class ImagesList extends React.Component<IProps, IState> {
             isScrolling={isScrolling}
             isChecked={this.isImageChecked(imageIndex)}
             imageData={this.props.imagesData[imageIndex]}
+            showConfidence={this.props.showAIConfidence}
             onClick={() => this.onClickHandler(imageIndex)}
             isSelected={this.props.activeImageIndex === imageIndex}
         />
@@ -178,23 +273,65 @@ class ImagesList extends React.Component<IProps, IState> {
         const imagesWithPendingDetectionsCount = this.getImagesWithPendingDetectionsCount();
         const visibleImageIndexes = this.getVisibleImageIndexes();
         const previewSize = this.getPreviewSize();
+        const confidenceRangeLabel = `${this.state.minConfidence}% - ${this.state.maxConfidence}%`;
         return(
             <div
                 className="ImagesList"
                 onClick={() => ContextManager.switchCtx(ContextType.LEFT_NAVBAR)}
             >
                 <div className="ImagesListHeader">
-                    <UnderlineTextButton
-                        label={`Detections only (${detectedImageIndexes.length}/${this.props.imagesData.length})`}
-                        active={this.state.showDetectionsOnly}
-                        under={true}
-                        onClick={this.toggleDetectionsOnly}
-                    />
+                    <select
+                        className="ImagesListFilterSelect"
+                        value={this.state.filterMode}
+                        onChange={this.onFilterModeChange}
+                    >
+                        <option value={ImageFilterMode.ALL}>All images ({visibleImageIndexes.length}/{this.props.imagesData.length})</option>
+                        <option value={ImageFilterMode.WITH_ANNOTATIONS}>With annotations ({detectedImageIndexes.length})</option>
+                        <option value={ImageFilterMode.WITH_SUGGESTIONS}>With suggestions</option>
+                        <option value={ImageFilterMode.WITHOUT_SUGGESTIONS}>No suggestions</option>
+                        <option value={ImageFilterMode.WITHOUT_ANNOTATIONS}>No annotations</option>
+                    </select>
                     <UnderlineTextButton
                         label={`Validate all (${imagesWithPendingDetectionsCount})`}
                         under={true}
                         onClick={this.validateAllImages}
                     />
+                    <div className="ImagesListConfidenceFilter">
+                        <label className="ImagesListShowConfidence">
+                            <input
+                                type="checkbox"
+                                checked={this.props.showAIConfidence}
+                                onChange={this.onShowConfidenceChange}
+                            />
+                            <span>Show confidence</span>
+                        </label>
+                        <div className="ImagesListConfidenceHeader">
+                            <span>Confidence</span>
+                            <span>{confidenceRangeLabel}</span>
+                        </div>
+                        <label>
+                            <span>Min</span>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={this.state.minConfidence}
+                                onChange={this.onMinimumConfidenceChange}
+                            />
+                        </label>
+                        <label>
+                            <span>Max</span>
+                            <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="1"
+                                value={this.state.maxConfidence}
+                                onChange={this.onMaximumConfidenceChange}
+                            />
+                        </label>
+                    </div>
                 </div>
                 <div
                     className="ImagesListBody"
@@ -209,7 +346,7 @@ class ImagesList extends React.Component<IProps, IState> {
                     />}
                     {!!size && visibleImageIndexes.length === 0 &&
                         <div className="ImagesListEmpty">
-                            No images with detections
+                            No images match the filters
                         </div>}
                 </div>
             </div>
@@ -217,12 +354,15 @@ class ImagesList extends React.Component<IProps, IState> {
     }
 }
 
-const mapDispatchToProps = {};
+const mapDispatchToProps = {
+    updateShowAIConfidenceStatus
+};
 
 const mapStateToProps = (state: AppState) => ({
     activeImageIndex: state.labels.activeImageIndex,
     imagesData: state.labels.imagesData,
-    activeLabelType: state.labels.activeLabelType
+    activeLabelType: state.labels.activeLabelType,
+    showAIConfidence: state.general.showAIConfidence
 });
 
 export default connect(

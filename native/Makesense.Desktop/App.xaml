@@ -30,6 +30,9 @@
         <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#FFFFFF" />
         <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#101B2B" />
         <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.MenuBrushKey}" Color="#0E1726" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.MenuTextBrushKey}" Color="#F5F8FC" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#7387A2" />
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#4FA3FF" />
         <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#FFFFFF" />
         <SolidColorBrush x:Key="{x:Static SystemColors.HotTrackBrushKey}" Color="#55F0D6" />
@@ -81,6 +84,46 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <Style TargetType="Menu">
+            <Setter Property="Background" Value="{StaticResource ChromeBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="FontFamily" Value="Bahnschrift" />
+        </Style>
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="Background" Value="{StaticResource SurfaceBackgroundBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="FontFamily" Value="Bahnschrift" />
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#22324A" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                </Trigger>
+                <Trigger Property="IsSubmenuOpen" Value="True">
+                    <Setter Property="Background" Value="#22324A" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                    <Setter Property="Opacity" Value="0.75" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Margin" Value="0,6,0,6" />
+            <Setter Property="Background" Value="{StaticResource BorderBrush}" />
         </Style>
 
         <Style TargetType="TextBox">
@@ -325,9 +368,5 @@
             <Setter Property="BorderThickness" Value="0" />
         </Style>
 
-        <Style TargetType="Separator">
-            <Setter Property="Margin" Value="0,10,0,10" />
-            <Setter Property="Background" Value="{StaticResource BorderBrush}" />
-        </Style>
     </Application.Resources>
 </Application>

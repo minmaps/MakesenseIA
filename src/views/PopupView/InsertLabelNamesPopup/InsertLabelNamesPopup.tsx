@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import './InsertLabelNamesPopup.scss';
 import { GenericYesNoPopup } from '../GenericYesNoPopup/GenericYesNoPopup';
 import { PopupWindowType } from '../../../data/enums/PopupWindowType';
-import { updateLabelNames } from '../../../store/labels/actionCreators';
+import { updateActiveLabelNameId, updateLabelNames } from '../../../store/labels/actionCreators';
 import { updateActivePopupType, updatePerClassColorationStatus } from '../../../store/general/actionCreators';
 import { AppState } from '../../../store';
 import { connect } from 'react-redux';
@@ -26,6 +26,7 @@ import { StyledTextField } from '../../Common/StyledTextField/StyledTextField';
 interface IProps {
     updateActivePopupTypeAction: (activePopupType: PopupWindowType) => any;
     updateLabelNamesAction: (labels: LabelName[]) => any;
+    updateActiveLabelNameIdAction: (activeLabelNameId: string) => any;
     updatePerClassColorationStatusAction: (updatePerClassColoration: boolean) => any;
     submitNewNotificationAction: (notification: INotification) => any;
     isUpdate: boolean;
@@ -37,6 +38,7 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
     {
         updateActivePopupTypeAction,
         updateLabelNamesAction,
+        updateActiveLabelNameIdAction,
         updatePerClassColorationStatusAction,
         submitNewNotificationAction,
         isUpdate,
@@ -55,8 +57,17 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
         return uniqueLabelNames.length === labelNames.length;
     };
 
+    const validateAtLeastOneLabelName = (): boolean => {
+        return labelNames.filter((labelName: LabelName) => labelName.name.length > 0).length > 0;
+    };
+
     const callbackWithLabelNamesValidation = (callback: () => any): () => any => {
         return () => {
+            if (!validateAtLeastOneLabelName()) {
+                submitNewNotificationAction(NotificationUtil
+                    .createErrorNotification(NotificationsDataMap[Notification.EMPTY_LABEL_NAME_ERROR]));
+                return;
+            }
             if (!validateEmptyLabelNames()) {
                 submitNewNotificationAction(NotificationUtil
                     .createErrorNotification(NotificationsDataMap[Notification.EMPTY_LABEL_NAME_ERROR]));
@@ -150,9 +161,8 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
     const onCreateAcceptCallback = () => {
         const nonEmptyLabelNames: LabelName[] = reject(labelNames,
             (labelName: LabelName) => labelName.name.length === 0);
-        if (labelNames.length > 0) {
-            updateLabelNamesAction(nonEmptyLabelNames);
-        }
+        updateLabelNamesAction(nonEmptyLabelNames);
+        updateActiveLabelNameIdAction(nonEmptyLabelNames[0].id);
         updateActivePopupTypeAction(null);
     };
 
@@ -164,6 +174,9 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
         const missingIds: string[] = LabelUtil.labelNamesIdsDiff(LabelsSelector.getLabelNames(), nonEmptyLabelNames);
         LabelActions.removeLabelNames(missingIds);
         updateLabelNamesAction(nonEmptyLabelNames);
+        if (!nonEmptyLabelNames.find((labelName: LabelName) => labelName.id === LabelsSelector.getActiveLabelNameId())) {
+            updateActiveLabelNameIdAction(nonEmptyLabelNames[0].id);
+        }
         updateActivePopupTypeAction(null);
     };
 
@@ -205,7 +218,7 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
                             'You can now edit the label names you use to describe the objects in the photos. Use the ' +
                             '+ button to add a new empty text field.' :
                             'Before you start, you can create a list of labels you plan to assign to objects in your ' +
-                            'project. You can also choose to skip that part for now and define label names as you go.'
+                            'project. Create at least one label or load a prepared label file before starting.'
                     }
                 </div>
                 <div className='LabelsContainer'>
@@ -246,6 +259,7 @@ const InsertLabelNamesPopup: React.FC<IProps> = (
 const mapDispatchToProps = {
     updateActivePopupTypeAction: updateActivePopupType,
     updateLabelNamesAction: updateLabelNames,
+    updateActiveLabelNameIdAction: updateActiveLabelNameId,
     updatePerClassColorationStatusAction: updatePerClassColorationStatus,
     submitNewNotificationAction: submitNewNotification
 };
