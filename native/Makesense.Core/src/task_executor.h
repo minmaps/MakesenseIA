@@ -16,7 +16,7 @@ public:
 
     void configure(std::size_t thread_count);
     void submit(std::function<void()> task);
-    void shutdown();
+    void shutdown(bool discard_pending = false);
 
 private:
     void worker_loop();

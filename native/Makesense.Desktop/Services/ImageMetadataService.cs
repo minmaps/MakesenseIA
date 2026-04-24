@@ -6,15 +6,10 @@ namespace Makesense.Desktop.Services;
 
 public sealed class ImageMetadataService
 {
-    public ImageRecord CreateRecord(string path)
+    public ImageRecord CreateRecord(string path, bool readPixelSize = true)
     {
         var fileInfo = new FileInfo(path);
-        using var stream = File.OpenRead(path);
-        var decoder = BitmapDecoder.Create(
-            stream,
-            BitmapCreateOptions.DelayCreation | BitmapCreateOptions.IgnoreColorProfile,
-            BitmapCacheOption.None);
-        var frame = decoder.Frames[0];
+        Size2D? pixelSize = readPixelSize ? ReadPixelSize(path) : null;
 
         return new ImageRecord
         {
@@ -22,7 +17,25 @@ public sealed class ImageMetadataService
             Path = path,
             FileName = fileInfo.Name,
             FileSizeBytes = fileInfo.Length,
-            PixelSize = new Size2D(frame.PixelWidth, frame.PixelHeight)
+            PixelSize = pixelSize
         };
+    }
+
+    public Size2D ReadPixelSize(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 4096,
+            FileOptions.SequentialScan);
+        var decoder = BitmapDecoder.Create(
+            stream,
+            BitmapCreateOptions.DelayCreation | BitmapCreateOptions.IgnoreColorProfile,
+            BitmapCacheOption.None);
+        var frame = decoder.Frames[0];
+
+        return new Size2D(frame.PixelWidth, frame.PixelHeight);
     }
 }

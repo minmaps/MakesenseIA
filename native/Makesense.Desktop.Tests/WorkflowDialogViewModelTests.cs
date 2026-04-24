@@ -39,6 +39,7 @@ public sealed class WorkflowDialogViewModelTests
             "sample",
             ProjectKind.ObjectDetection,
             () => [@"C:\images\a.png"],
+            () => [@"C:\images\a.png"],
             () => ["car", "person"],
             _ => Task.FromResult(true),
             () => Task.FromResult(false),
@@ -64,6 +65,7 @@ public sealed class WorkflowDialogViewModelTests
         var dialog = new ProjectSetupDialogViewModel(
             "sample",
             ProjectKind.ObjectDetection,
+            () => null,
             () => null,
             () => null,
             _ => Task.FromResult(false),

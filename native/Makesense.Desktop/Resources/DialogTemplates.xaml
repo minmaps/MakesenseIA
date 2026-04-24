@@ -25,6 +25,7 @@
                 <TextBlock FontWeight="SemiBold" Text="Images" />
                 <DockPanel Margin="0,8,0,0">
                     <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Choose Images" Command="{Binding BrowseImagesCommand}" />
+                    <Button DockPanel.Dock="Right" Margin="8,0,0,0" Content="Choose Folder" Command="{Binding BrowseImageFolderCommand}" />
                     <TextBlock VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" Text="{Binding SelectedImagesSummary}" />
                 </DockPanel>
             </StackPanel>
@@ -43,6 +44,8 @@
             </Grid>
             <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
                 <Button Content="Open Existing Project" Command="{Binding OpenExistingProjectCommand}" />
+                <ProgressBar Width="120" Height="6" Margin="0,0,12,0" VerticalAlignment="Center" IsIndeterminate="True" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <TextBlock Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" Text="Creating project..." Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 <TextBlock Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{StaticResource AccentBrush}" Text="Create or open a project before annotation." />
                 <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" Visibility="{Binding IsCancelable, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 <Button Content="Create Project" Command="{Binding ConfirmCommand}" IsDefault="True" />

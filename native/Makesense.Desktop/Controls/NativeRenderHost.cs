@@ -13,6 +13,7 @@ public sealed class NativeRenderHost : HwndHost
     private readonly DispatcherTimer _renderTimer;
     private nint _hostHandle;
     private NativeEngineSession? _session;
+    private PerformanceConfig _performanceConfig = DefaultConfig();
 
     public NativeRenderHost()
     {
@@ -36,6 +37,19 @@ public sealed class NativeRenderHost : HwndHost
 
             _session = value;
             EnsureSessionAttached();
+        }
+    }
+
+    public PerformanceConfig PerformanceConfig
+    {
+        get => _performanceConfig;
+        set
+        {
+            _performanceConfig = value.Normalize();
+            if (_session?.IsAttached == true)
+            {
+                _session.SetPerformanceLimits(_performanceConfig);
+            }
         }
     }
 
@@ -108,7 +122,7 @@ public sealed class NativeRenderHost : HwndHost
             return;
         }
 
-        _session.Attach(_hostHandle, (int)Math.Max(ActualWidth, 1), (int)Math.Max(ActualHeight, 1), DefaultConfig());
+        _session.Attach(_hostHandle, (int)Math.Max(ActualWidth, 1), (int)Math.Max(ActualHeight, 1), _performanceConfig);
     }
 
     private static PerformanceConfig DefaultConfig()

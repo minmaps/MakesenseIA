@@ -29,6 +29,7 @@ struct stored_inference_result
     std::wstring provider_name;
     std::wstring status_message;
     ms_result_code result_code{MS_RESULT_NOT_FOUND};
+    bool is_complete{false};
     std::vector<native_inference_suggestion> suggestions;
 };
 
@@ -53,6 +54,7 @@ public:
     ms_result_code get_inference_batch_result_summary(std::uint32_t index, ms_inference_result_summary* summary) const;
     ms_result_code get_inference_batch_result_suggestion(std::uint32_t result_index, std::uint32_t suggestion_index, ms_inference_suggestion* suggestion) const;
     ms_result_code export_annotations(const ms_export_request& request);
+    void shutdown() noexcept;
 
 private:
     ms_result_code initialize_device_resources();
@@ -121,6 +123,7 @@ private:
     ms_result_code batch_inference_result_code_{MS_RESULT_NOT_FOUND};
     std::wstring batch_inference_status_message_;
     std::vector<stored_inference_result> batch_inference_results_;
+    std::vector<std::uint32_t> batch_inference_completed_indices_;
 
     budgeted_lru ram_cache_;
     budgeted_lru vram_cache_;

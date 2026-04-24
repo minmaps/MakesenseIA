@@ -2,14 +2,17 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
 using Makesense.Desktop.Controls;
+using Makesense.Desktop.Services;
 using Makesense.Desktop.ViewModels;
 using System.ComponentModel;
+using System.Threading;
 using System.Windows.Threading;
 
 namespace Makesense.Desktop;
 
 public partial class MainWindow : Window
 {
+    private static int _processExitRequested;
     private MainWindowViewModel? _viewModel;
 
     public MainWindow()
@@ -38,6 +41,7 @@ public partial class MainWindow : Window
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         }
 
+        RenderHost.PerformanceConfig = _viewModel?.Performance.ToModel() ?? RenderHost.PerformanceConfig;
         RenderHost.Session = _viewModel?.EngineSession;
     }
 
@@ -59,6 +63,28 @@ public partial class MainWindow : Window
         {
             disposable.Dispose();
         }
+
+        EnsureProcessTerminatesAfterClose();
+    }
+
+    private static void EnsureProcessTerminatesAfterClose()
+    {
+        if (Interlocked.Exchange(ref _processExitRequested, 1) != 0)
+        {
+            return;
+        }
+
+        var exitThread = new Thread(() =>
+        {
+            Thread.Sleep(TimeSpan.FromMilliseconds(750));
+            NativeEngineSession.ForceTerminateCurrentProcess();
+        })
+        {
+            IsBackground = true,
+            Name = "Makesense desktop process terminator"
+        };
+
+        exitThread.Start();
     }
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -100,12 +100,121 @@
             <Setter Property="BorderThickness" Value="1" />
         </Style>
 
+        <ControlTemplate x:Key="TopLevelMenuItemTemplate" TargetType="{x:Type MenuItem}">
+            <Grid>
+                <Border x:Name="Root"
+                        Background="{TemplateBinding Background}"
+                        Padding="{TemplateBinding Padding}">
+                    <ContentPresenter ContentSource="Header"
+                                      RecognizesAccessKey="True"
+                                      VerticalAlignment="Center" />
+                </Border>
+                <Popup x:Name="PART_Popup"
+                       Placement="Bottom"
+                       AllowsTransparency="True"
+                       Focusable="False"
+                       PopupAnimation="Fade"
+                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                    <Border Background="{StaticResource SurfaceBackgroundBrush}"
+                            BorderBrush="{StaticResource BorderStrongBrush}"
+                            BorderThickness="1"
+                            Padding="4">
+                        <ScrollViewer CanContentScroll="True">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </ScrollViewer>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="#22324A" />
+                </Trigger>
+                <Trigger Property="IsSubmenuOpen" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="#22324A" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <ControlTemplate x:Key="SubmenuMenuItemTemplate" TargetType="{x:Type MenuItem}">
+            <Grid>
+                <Border x:Name="Root"
+                        MinWidth="300"
+                        Background="{TemplateBinding Background}"
+                        Padding="{TemplateBinding Padding}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="24" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="18" />
+                        </Grid.ColumnDefinitions>
+                        <ContentPresenter Grid.Column="1"
+                                          ContentSource="Header"
+                                          RecognizesAccessKey="True"
+                                          VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2"
+                                   Margin="24,0,12,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Text="{TemplateBinding InputGestureText}" />
+                        <Path x:Name="SubmenuArrow"
+                              Grid.Column="3"
+                              Width="6"
+                              Height="10"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Fill="{StaticResource TextSecondaryBrush}"
+                              Data="M 0 0 L 6 5 L 0 10 Z" />
+                    </Grid>
+                </Border>
+                <Popup x:Name="PART_Popup"
+                       Placement="Right"
+                       HorizontalOffset="-2"
+                       AllowsTransparency="True"
+                       Focusable="False"
+                       PopupAnimation="Fade"
+                       IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                    <Border Background="{StaticResource SurfaceBackgroundBrush}"
+                            BorderBrush="{StaticResource BorderStrongBrush}"
+                            BorderThickness="1"
+                            Padding="4">
+                        <ScrollViewer CanContentScroll="True">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </ScrollViewer>
+                    </Border>
+                </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="HasItems" Value="False">
+                    <Setter TargetName="SubmenuArrow" Property="Visibility" Value="Collapsed" />
+                </Trigger>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="#22324A" />
+                </Trigger>
+                <Trigger Property="IsSubmenuOpen" Value="True">
+                    <Setter TargetName="Root" Property="Background" Value="#22324A" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55" />
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
         <Style TargetType="MenuItem">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
             <Setter Property="Padding" Value="10,5" />
             <Setter Property="FontFamily" Value="Bahnschrift" />
+            <Setter Property="Template" Value="{StaticResource SubmenuMenuItemTemplate}" />
             <Style.Triggers>
+                <Trigger Property="Role" Value="TopLevelHeader">
+                    <Setter Property="Template" Value="{StaticResource TopLevelMenuItemTemplate}" />
+                </Trigger>
+                <Trigger Property="Role" Value="TopLevelItem">
+                    <Setter Property="Template" Value="{StaticResource TopLevelMenuItemTemplate}" />
+                </Trigger>
                 <Trigger Property="IsHighlighted" Value="True">
                     <Setter Property="Background" Value="#22324A" />
                     <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />

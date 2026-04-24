@@ -10,11 +10,13 @@
 #include <array>
 #include <cmath>
 #include <filesystem>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -37,6 +39,31 @@ namespace
             : static_cast<std::size_t>(max_vram_mb) * 1024ULL * 1024ULL;
     }
 
+    struct preprocessed_image
+    {
+        std::vector<float> tensor;
+        std::vector<int64_t> input_shape;
+        std::uint32_t source_width{0};
+        std::uint32_t source_height{0};
+        float scale{1.0f};
+        float pad_x{0.0f};
+        float pad_y{0.0f};
+        bool nchw{true};
+        std::int64_t input_width{640};
+        std::int64_t input_height{640};
+    };
+
+    struct preprocessed_cache_entry
+    {
+        std::wstring image_path;
+        std::uintmax_t image_size{0};
+        std::filesystem::file_time_type last_write_time{};
+        std::int64_t input_width{640};
+        std::int64_t input_height{640};
+        bool nchw{true};
+        std::shared_ptr<preprocessed_image> image;
+    };
+
     struct session_entry
     {
         std::wstring model_path;
@@ -52,20 +79,8 @@ namespace
         bool nchw{true};
         std::int64_t input_width{640};
         std::int64_t input_height{640};
-    };
-
-    struct preprocessed_image
-    {
-        std::vector<float> tensor;
-        std::vector<int64_t> input_shape;
-        std::uint32_t source_width{0};
-        std::uint32_t source_height{0};
-        float scale{1.0f};
-        float pad_x{0.0f};
-        float pad_y{0.0f};
-        bool nchw{true};
-        std::int64_t input_width{640};
-        std::int64_t input_height{640};
+        std::mutex preprocessing_cache_mutex;
+        std::optional<preprocessed_cache_entry> preprocessing_cache;
     };
 
     struct tensor_view
@@ -74,6 +89,35 @@ namespace
         std::vector<int64_t> shape;
         std::size_t element_count{0};
     };
+
+    bool runtime_module_available(std::initializer_list<const wchar_t*> module_names)
+    {
+        for (const auto* module_name : module_names)
+        {
+            if (GetModuleHandleW(module_name) != nullptr)
+            {
+                return true;
+            }
+
+            const auto module = LoadLibraryW(module_name);
+            if (module != nullptr)
+            {
+                FreeLibrary(module);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    int cpu_inference_thread_count()
+    {
+        const auto hardware_threads = std::thread::hardware_concurrency();
+        return static_cast<int>(std::clamp<unsigned int>(
+            hardware_threads == 0 ? 4U : hardware_threads,
+            1U,
+            16U));
+    }
 
     std::wstring widen_utf8(const std::string& value)
     {
@@ -183,9 +227,17 @@ namespace
         return view;
     }
 
-    bool create_wic_factory(ComPtr<IWICImagingFactory>& factory)
+    bool get_thread_wic_factory(ComPtr<IWICImagingFactory>& factory)
     {
-        return SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)));
+        thread_local ComPtr<IWICImagingFactory> cached_factory;
+        if (!cached_factory &&
+            FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&cached_factory))))
+        {
+            return false;
+        }
+
+        factory = cached_factory;
+        return true;
     }
 
     bool load_and_preprocess_image(
@@ -195,7 +247,7 @@ namespace
         std::wstring& status)
     {
         ComPtr<IWICImagingFactory> wic_factory;
-        if (!create_wic_factory(wic_factory))
+        if (!get_thread_wic_factory(wic_factory))
         {
             status = L"Failed to create WIC factory for inference preprocessing.";
             return false;
@@ -225,9 +277,9 @@ namespace
 
         ComPtr<IWICFormatConverter> converter;
         if (FAILED(wic_factory->CreateFormatConverter(&converter)) ||
-            FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeMedianCut)))
+            FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeCustom)))
         {
-            status = L"Failed to convert the input image into a GPU-ready format.";
+            status = L"Failed to convert the input image into an inference-ready format.";
             return false;
         }
 
@@ -244,7 +296,7 @@ namespace
         if (resized_width != source_width || resized_height != source_height)
         {
             if (FAILED(wic_factory->CreateBitmapScaler(&scaler)) ||
-                FAILED(scaler->Initialize(converter.Get(), resized_width, resized_height, WICBitmapInterpolationModeFant)))
+                FAILED(scaler->Initialize(converter.Get(), resized_width, resized_height, WICBitmapInterpolationModeLinear)))
             {
                 status = L"Failed to resize the input image for model inference.";
                 return false;
@@ -276,41 +328,111 @@ namespace
         const auto target_height = static_cast<std::size_t>(session.input_height);
         const auto pad_left = static_cast<std::size_t>(std::floor(pad_x));
         const auto pad_top = static_cast<std::size_t>(std::floor(pad_y));
+        const auto bounded_pad_left = std::min(pad_left, target_width - 1ULL);
+        const auto bounded_pad_top = std::min(pad_top, target_height - 1ULL);
+        const auto copy_width = std::min<std::size_t>(resized_width, target_width - bounded_pad_left);
+        const auto copy_height = std::min<std::size_t>(resized_height, target_height - bounded_pad_top);
+        constexpr auto inv_255 = 1.0f / 255.0f;
 
-        auto write_pixel = [&](std::size_t x, std::size_t y, float red, float green, float blue)
+        if (output.nchw)
         {
-            if (output.nchw)
-            {
-                const auto plane = target_width * target_height;
-                const auto index = y * target_width + x;
-                output.tensor[index] = red;
-                output.tensor[plane + index] = green;
-                output.tensor[(2 * plane) + index] = blue;
-            }
-            else
-            {
-                const auto index = (y * target_width + x) * 3ULL;
-                output.tensor[index] = red;
-                output.tensor[index + 1ULL] = green;
-                output.tensor[index + 2ULL] = blue;
-            }
-        };
+            const auto plane = target_width * target_height;
+            auto* red_plane = output.tensor.data();
+            auto* green_plane = red_plane + plane;
+            auto* blue_plane = green_plane + plane;
 
-        for (std::size_t y = 0; y < resized_height; ++y)
-        {
-            for (std::size_t x = 0; x < resized_width; ++x)
+            for (std::size_t y = 0; y < copy_height; ++y)
             {
-                const auto source_index = (y * resized_width + x) * 4ULL;
-                const auto blue = resized_pixels[source_index] / 255.0f;
-                const auto green = resized_pixels[source_index + 1ULL] / 255.0f;
-                const auto red = resized_pixels[source_index + 2ULL] / 255.0f;
-                const auto target_x = std::min<std::size_t>(target_width - 1ULL, pad_left + x);
-                const auto target_y = std::min<std::size_t>(target_height - 1ULL, pad_top + y);
-                write_pixel(target_x, target_y, red, green, blue);
+                const auto* source_row = resized_pixels.data() + (y * resized_width * 4ULL);
+                const auto target_index = (bounded_pad_top + y) * target_width + bounded_pad_left;
+                for (std::size_t x = 0; x < copy_width; ++x)
+                {
+                    const auto source_index = x * 4ULL;
+                    red_plane[target_index + x] = source_row[source_index + 2ULL] * inv_255;
+                    green_plane[target_index + x] = source_row[source_index + 1ULL] * inv_255;
+                    blue_plane[target_index + x] = source_row[source_index] * inv_255;
+                }
+            }
+        }
+        else
+        {
+            for (std::size_t y = 0; y < copy_height; ++y)
+            {
+                const auto* source_row = resized_pixels.data() + (y * resized_width * 4ULL);
+                auto* target_row = output.tensor.data() + (((bounded_pad_top + y) * target_width + bounded_pad_left) * 3ULL);
+                for (std::size_t x = 0; x < copy_width; ++x)
+                {
+                    const auto source_index = x * 4ULL;
+                    const auto target_index = x * 3ULL;
+                    target_row[target_index] = source_row[source_index + 2ULL] * inv_255;
+                    target_row[target_index + 1ULL] = source_row[source_index + 1ULL] * inv_255;
+                    target_row[target_index + 2ULL] = source_row[source_index] * inv_255;
+                }
             }
         }
 
         return true;
+    }
+
+    std::shared_ptr<preprocessed_image> get_or_preprocess_image(
+        const std::wstring& image_path,
+        const std::shared_ptr<session_entry>& session,
+        std::wstring& status)
+    {
+        std::error_code error;
+        const auto image_size = std::filesystem::file_size(image_path, error);
+        if (error)
+        {
+            status = L"Failed to inspect image before inference preprocessing.";
+            return nullptr;
+        }
+
+        const auto last_write_time = std::filesystem::last_write_time(image_path, error);
+        if (error)
+        {
+            status = L"Failed to read image timestamp before inference preprocessing.";
+            return nullptr;
+        }
+
+        {
+            std::scoped_lock lock(session->preprocessing_cache_mutex);
+            if (session->preprocessing_cache.has_value())
+            {
+                const auto& cached = *session->preprocessing_cache;
+                if (cached.image_path == image_path &&
+                    cached.image_size == image_size &&
+                    cached.last_write_time == last_write_time &&
+                    cached.input_width == session->input_width &&
+                    cached.input_height == session->input_height &&
+                    cached.nchw == session->nchw &&
+                    cached.image)
+                {
+                    return cached.image;
+                }
+            }
+        }
+
+        auto preprocessed = std::make_shared<preprocessed_image>();
+        if (!load_and_preprocess_image(image_path, *session, *preprocessed, status))
+        {
+            return nullptr;
+        }
+
+        {
+            std::scoped_lock lock(session->preprocessing_cache_mutex);
+            session->preprocessing_cache = preprocessed_cache_entry
+            {
+                .image_path = image_path,
+                .image_size = image_size,
+                .last_write_time = last_write_time,
+                .input_width = session->input_width,
+                .input_height = session->input_height,
+                .nchw = session->nchw,
+                .image = preprocessed
+            };
+        }
+
+        return preprocessed;
     }
 
     float compute_iou(const native_inference_suggestion& left, const native_inference_suggestion& right)
@@ -661,8 +783,8 @@ namespace
                 return result.result_code;
             }
 
-            preprocessed_image preprocessed;
-            if (!load_and_preprocess_image(request.image_path, *session, preprocessed, status))
+            auto preprocessed = get_or_preprocess_image(request.image_path, session, status);
+            if (!preprocessed)
             {
                 return MS_RESULT_ERROR;
             }
@@ -670,10 +792,10 @@ namespace
             Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
             auto input_tensor = Ort::Value::CreateTensor<float>(
                 memory_info,
-                preprocessed.tensor.data(),
-                preprocessed.tensor.size(),
-                preprocessed.input_shape.data(),
-                preprocessed.input_shape.size());
+                preprocessed->tensor.data(),
+                preprocessed->tensor.size(),
+                preprocessed->input_shape.data(),
+                preprocessed->input_shape.size());
 
             std::array<const char*, 1> input_names = { session->input_name.c_str() };
             std::vector<Ort::Value> outputs;
@@ -709,8 +831,8 @@ namespace
                 }
 
                 suggestions = request.task_name == L"pose-estimation"
-                    ? parse_pose_output(*tensor, preprocessed, base_label)
-                    : parse_detection_output(*tensor, preprocessed, base_label);
+                    ? parse_pose_output(*tensor, *preprocessed, base_label)
+                    : parse_detection_output(*tensor, *preprocessed, base_label);
 
                 if (!suggestions.empty())
                 {
@@ -773,12 +895,18 @@ namespace
             std::filesystem::file_time_type last_write_time,
             std::wstring& status)
         {
-            const std::array<std::pair<std::wstring, int>, 3> provider_attempts =
-            {{
-                {L"TensorRT", 2},
-                {L"CUDA", 1},
-                {L"CPU", 0}
-            }};
+            std::vector<std::pair<std::wstring, int>> provider_attempts;
+            if (runtime_module_available({L"nvinfer_10.dll", L"nvinfer_9.dll", L"nvinfer_8.dll"}))
+            {
+                provider_attempts.emplace_back(L"TensorRT", 2);
+            }
+
+            if (runtime_module_available({L"cudart64_12.dll", L"cudart64_11.dll"}))
+            {
+                provider_attempts.emplace_back(L"CUDA", 1);
+            }
+
+            provider_attempts.emplace_back(L"CPU", 0);
 
             std::wstring failure_details;
             for (const auto& [provider_name, provider_kind] : provider_attempts)
@@ -786,9 +914,12 @@ namespace
                 try
                 {
                     Ort::SessionOptions options;
+                    options.EnableCpuMemArena();
+                    options.EnableMemPattern();
                     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
                     options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
-                    options.SetIntraOpNumThreads(1);
+                    options.SetIntraOpNumThreads(provider_kind == 0 ? cpu_inference_thread_count() : 1);
+                    options.SetInterOpNumThreads(1);
 
                     if (provider_kind == 2)
                     {
@@ -806,11 +937,23 @@ namespace
                     }
                     else if (provider_kind == 1)
                     {
+                        std::filesystem::create_directories(request.cache_directory);
+                        const auto optimized_model_path = std::filesystem::path(request.cache_directory) /
+                            (std::filesystem::path(request.model_path).stem().wstring() + L".cuda.optimized.onnx");
+                        options.SetOptimizedModelFilePath(optimized_model_path.c_str());
+
                         OrtCUDAProviderOptions cuda_options{};
                         cuda_options.device_id = 0;
                         cuda_options.gpu_mem_limit = vram_budget_bytes(request.max_vram_mb);
                         cuda_options.arena_extend_strategy = 1;
                         options.AppendExecutionProvider_CUDA(cuda_options);
+                    }
+                    else
+                    {
+                        std::filesystem::create_directories(request.cache_directory);
+                        const auto optimized_model_path = std::filesystem::path(request.cache_directory) /
+                            (std::filesystem::path(request.model_path).stem().wstring() + L".cpu.optimized.onnx");
+                        options.SetOptimizedModelFilePath(optimized_model_path.c_str());
                     }
 
                     auto session = std::make_unique<Ort::Session>(env_, request.model_path.c_str(), options);

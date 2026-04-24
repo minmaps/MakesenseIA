@@ -34,11 +34,16 @@ void task_executor::submit(std::function<void()> task)
     condition_.notify_one();
 }
 
-void task_executor::shutdown()
+void task_executor::shutdown(bool discard_pending)
 {
     {
         std::lock_guard lock(mutex_);
         stopping_ = true;
+        if (discard_pending)
+        {
+            std::queue<std::function<void()>> empty;
+            std::swap(tasks_, empty);
+        }
     }
 
     condition_.notify_all();
@@ -53,9 +58,9 @@ void task_executor::shutdown()
 
     threads_.clear();
 
-    std::queue<std::function<void()>> empty;
     {
         std::lock_guard lock(mutex_);
+        std::queue<std::function<void()>> empty;
         std::swap(tasks_, empty);
     }
 }

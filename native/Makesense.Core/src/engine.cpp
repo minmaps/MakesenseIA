@@ -39,9 +39,36 @@ native_engine::native_engine(HWND hwnd, std::uint32_t width, std::uint32_t heigh
 
 native_engine::~native_engine()
 {
-    inference_executor_.shutdown();
-    decode_executor_.shutdown();
-    io_executor_.shutdown();
+    shutdown();
+}
+
+void native_engine::shutdown() noexcept
+{
+    try
+    {
+        ++image_generation_;
+        ++inference_generation_;
+
+        {
+            std::scoped_lock lock(state_mutex_);
+            batch_inference_running_ = false;
+            batch_inference_status_message_ = L"Native engine shutdown requested.";
+        }
+
+        inference_executor_.shutdown(true);
+        decode_executor_.shutdown(true);
+        io_executor_.shutdown(true);
+
+        inference_backend_.reset();
+        active_image_bitmap_.Reset();
+        d2d_target_bitmap_.Reset();
+        swap_chain_.Reset();
+        d2d_context_.Reset();
+        d3d_context_.Reset();
+    }
+    catch (...)
+    {
+    }
 }
 
 ms_result_code native_engine::set_performance_limits(const ms_performance_config& config)
@@ -402,6 +429,7 @@ ms_result_code native_engine::run_inference_batch(const ms_inference_batch_reque
             result.task_name = task_name;
             result.result_code = MS_RESULT_NOT_FOUND;
             result.status_message = L"Queued.";
+            result.is_complete = false;
         }
 
         update_status(batch_inference_status_message_);
@@ -417,6 +445,7 @@ ms_result_code native_engine::run_inference_batch(const ms_inference_batch_reque
             stored.active_image_path = image_path;
             stored.model_path = model_path;
             stored.task_name = task_name;
+            stored.is_complete = true;
 
             if (generation != inference_generation_.load())
             {
@@ -452,6 +481,7 @@ ms_result_code native_engine::run_inference_batch(const ms_inference_batch_reque
             }
 
             batch_inference_results_[index] = std::move(stored);
+            batch_inference_completed_indices_.push_back(static_cast<std::uint32_t>(index));
             batch_inference_completed_ = std::min<std::uint32_t>(
                 static_cast<std::uint32_t>(batch_inference_results_.size()),
                 batch_inference_completed_ + 1U);
@@ -539,7 +569,7 @@ ms_result_code native_engine::get_inference_batch_status(ms_inference_batch_stat
     copy_wstring(status->status_message, batch_inference_status_message_);
     status->completed_count = batch_inference_completed_;
     status->total_count = static_cast<std::uint32_t>(batch_inference_results_.size());
-    status->result_count = batch_inference_running_ ? 0U : static_cast<std::uint32_t>(batch_inference_results_.size());
+    status->result_count = static_cast<std::uint32_t>(batch_inference_completed_indices_.size());
     status->is_running = batch_inference_running_ ? 1U : 0U;
     status->generation = batch_inference_generation_;
     status->result_code = batch_inference_result_code_;
@@ -554,12 +584,18 @@ ms_result_code native_engine::get_inference_batch_result_summary(std::uint32_t i
     }
 
     std::scoped_lock lock(state_mutex_);
-    if (batch_inference_running_ || index >= batch_inference_results_.size())
+    if (index >= batch_inference_completed_indices_.size())
     {
         return MS_RESULT_NOT_FOUND;
     }
 
-    store_inference_summary(summary, batch_inference_results_[index]);
+    const auto result_index = batch_inference_completed_indices_[index];
+    if (result_index >= batch_inference_results_.size() || !batch_inference_results_[result_index].is_complete)
+    {
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    store_inference_summary(summary, batch_inference_results_[result_index]);
     return MS_RESULT_OK;
 }
 
@@ -571,14 +607,20 @@ ms_result_code native_engine::get_inference_batch_result_suggestion(std::uint32_
     }
 
     std::scoped_lock lock(state_mutex_);
-    if (batch_inference_running_ ||
-        result_index >= batch_inference_results_.size() ||
-        suggestion_index >= batch_inference_results_[result_index].suggestions.size())
+    if (result_index >= batch_inference_completed_indices_.size())
     {
         return MS_RESULT_NOT_FOUND;
     }
 
-    copy_inference_suggestion(suggestion, batch_inference_results_[result_index].suggestions[suggestion_index]);
+    const auto completed_result_index = batch_inference_completed_indices_[result_index];
+    if (completed_result_index >= batch_inference_results_.size() ||
+        !batch_inference_results_[completed_result_index].is_complete ||
+        suggestion_index >= batch_inference_results_[completed_result_index].suggestions.size())
+    {
+        return MS_RESULT_NOT_FOUND;
+    }
+
+    copy_inference_suggestion(suggestion, batch_inference_results_[completed_result_index].suggestions[suggestion_index]);
     return MS_RESULT_OK;
 }
 
@@ -907,6 +949,7 @@ void native_engine::clear_batch_inference_locked()
     batch_inference_result_code_ = MS_RESULT_NOT_FOUND;
     batch_inference_status_message_.clear();
     batch_inference_results_.clear();
+    batch_inference_completed_indices_.clear();
 }
 
 void native_engine::store_inference_summary(ms_inference_result_summary* summary, const stored_inference_result& source) const

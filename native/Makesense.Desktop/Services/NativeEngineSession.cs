@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -45,10 +46,12 @@ public sealed class NativeEngineSession : IDisposable
 
     private const uint LoadLibrarySearchDefaultDirs = 0x00001000;
     private const uint LoadLibrarySearchUserDirs = 0x00000400;
+    private static readonly TimeSpan NativeShutdownTimeout = TimeSpan.FromSeconds(2);
     private static int _nativeRuntimeConfigured;
     private readonly object _nativeCallGate = new();
     private nint _engineHandle;
     private bool _disposed;
+    private int _shutdownStarted;
 
     static NativeEngineSession()
     {
@@ -179,7 +182,7 @@ public sealed class NativeEngineSession : IDisposable
         string modelPath,
         string taskName,
         IReadOnlyList<string> imagePaths,
-        Action<int, int>? progress = null)
+        Action<int, int, IReadOnlyList<NativeInferenceImageResult>>? progress = null)
     {
         if (_engineHandle == nint.Zero || imagePaths.Count == 0)
         {
@@ -205,6 +208,8 @@ public sealed class NativeEngineSession : IDisposable
         }
 
         MsInferenceBatchStatus status;
+        var results = new List<NativeInferenceImageResult>(imagePaths.Count);
+        var nextResultIndex = 0U;
         do
         {
             Thread.Sleep(200);
@@ -219,27 +224,22 @@ public sealed class NativeEngineSession : IDisposable
                 return Array.Empty<NativeInferenceImageResult>();
             }
 
-            progress?.Invoke((int)status.CompletedCount, (int)status.TotalCount);
+            var completedResults = ReadAvailableBatchInferenceResults(nextResultIndex, status.ResultCount);
+            if (completedResults.Count > 0)
+            {
+                results.AddRange(completedResults);
+                nextResultIndex += (uint)completedResults.Count;
+            }
+
+            progress?.Invoke((int)status.CompletedCount, (int)status.TotalCount, completedResults);
         }
         while (status.IsRunning != 0);
 
-        var results = new List<NativeInferenceImageResult>((int)status.ResultCount);
-        for (var index = 0U; index < status.ResultCount; index++)
+        var remainingResults = ReadAvailableBatchInferenceResults(nextResultIndex, status.ResultCount);
+        if (remainingResults.Count > 0)
         {
-            NativeInferenceResultSummary summary;
-            lock (_nativeCallGate)
-            {
-                result = NativeMethods.ms_get_inference_batch_result_summary(_engineHandle, index, out var nativeSummary);
-                summary = ToModel(nativeSummary);
-            }
-
-            if (result != MsResultCode.Ok)
-            {
-                continue;
-            }
-
-            var suggestions = ReadBatchInferenceSuggestions(index, summary.SuggestionCount);
-            results.Add(new NativeInferenceImageResult(summary, suggestions));
+            results.AddRange(remainingResults);
+            progress?.Invoke((int)status.CompletedCount, (int)status.TotalCount, remainingResults);
         }
 
         return results;
@@ -349,24 +349,53 @@ public sealed class NativeEngineSession : IDisposable
 
     public void Shutdown()
     {
-        if (_engineHandle == nint.Zero)
+        if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
         {
             return;
         }
 
-        try
+        nint engineHandle;
+        lock (_nativeCallGate)
         {
-            lock (_nativeCallGate)
-            {
-                NativeMethods.ms_shutdown(_engineHandle);
-            }
-        }
-        catch (DllNotFoundException)
-        {
-        }
-        finally
-        {
+            engineHandle = _engineHandle;
             _engineHandle = nint.Zero;
+        }
+
+        if (engineHandle == nint.Zero)
+        {
+            return;
+        }
+
+        using var shutdownCompleted = new ManualResetEventSlim(false);
+        var shutdownThread = new Thread(() =>
+        {
+            try
+            {
+                lock (_nativeCallGate)
+                {
+                    NativeMethods.ms_shutdown(engineHandle);
+                }
+            }
+            catch (DllNotFoundException)
+            {
+            }
+            catch (EntryPointNotFoundException)
+            {
+            }
+            finally
+            {
+                shutdownCompleted.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Makesense native shutdown"
+        };
+
+        shutdownThread.Start();
+        if (!shutdownCompleted.Wait(NativeShutdownTimeout))
+        {
+            ForceTerminateCurrentProcess();
         }
     }
 
@@ -379,6 +408,19 @@ public sealed class NativeEngineSession : IDisposable
 
         Shutdown();
         _disposed = true;
+    }
+
+    internal static void ForceTerminateCurrentProcess()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            process.Kill(entireProcessTree: true);
+        }
+        catch
+        {
+            Environment.FailFast("Makesense desktop process failed to terminate after native shutdown timeout.");
+        }
     }
 
     private static void EnsureNativeRuntimeSearchPathConfigured()
@@ -547,6 +589,44 @@ public sealed class NativeEngineSession : IDisposable
         }
 
         return suggestions;
+    }
+
+    private IReadOnlyList<NativeInferenceImageResult> ReadAvailableBatchInferenceResults(uint startIndex, uint resultCount)
+    {
+        if (_engineHandle == nint.Zero || startIndex >= resultCount)
+        {
+            return Array.Empty<NativeInferenceImageResult>();
+        }
+
+        var results = new List<NativeInferenceImageResult>((int)(resultCount - startIndex));
+        for (var index = startIndex; index < resultCount; index++)
+        {
+            try
+            {
+                MsResultCode result;
+                NativeInferenceResultSummary summary;
+                lock (_nativeCallGate)
+                {
+                    result = NativeMethods.ms_get_inference_batch_result_summary(_engineHandle, index, out var nativeSummary);
+                    summary = ToModel(nativeSummary);
+                }
+
+                if (result != MsResultCode.Ok)
+                {
+                    break;
+                }
+
+                var suggestions = ReadBatchInferenceSuggestions(index, summary.SuggestionCount);
+                results.Add(new NativeInferenceImageResult(summary, suggestions));
+            }
+            catch (Exception exception)
+            {
+                StatusChanged?.Invoke(this, exception.Message);
+                break;
+            }
+        }
+
+        return results;
     }
 
     private static NativeInferenceResultSummary ToModel(MsInferenceResultSummary summary)

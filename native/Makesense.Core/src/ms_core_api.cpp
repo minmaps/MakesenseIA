@@ -249,7 +249,9 @@ extern "C" MS_CORE_API void ms_shutdown(void* engine)
 {
     try
     {
-        delete as_engine(engine);
+        auto* native = as_engine(engine);
+        native->shutdown();
+        delete native;
     }
     catch (...)
     {

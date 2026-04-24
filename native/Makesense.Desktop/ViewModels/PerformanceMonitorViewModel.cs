@@ -54,7 +54,7 @@ public sealed class PerformanceMonitorViewModel : ViewModelBase
     }
 
     public string StatusText => GpuMetricsAvailable
-        ? "Échantillonnage du process en temps réel"
+        ? "Échantillonnage du process en temps réel; limites = plafonds non réservés"
         : "GPU/VRAM indisponible sur ce pilote";
 
     public void Load(PerformanceMonitorSnapshot snapshot)

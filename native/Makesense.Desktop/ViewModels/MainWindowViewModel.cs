@@ -24,6 +24,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const string ProjectFileFilter = "Makesense Project (*.msproj;*.json)|*.msproj;*.json|JSON Manifest (*.json)|*.json|All Files (*.*)|*.*";
     private const string DefaultProjectExtension = ".msproj";
+    private static readonly string[] SupportedImageExtensions =
+    [
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".webp"
+    ];
 
     private readonly PerformanceConfigService _performanceConfigService;
     private readonly IPerformanceMonitorService _performanceMonitorService;
@@ -152,7 +162,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ];
 
         OpenImagesCommand = new RelayCommand(OpenImages, () => !IsImportRunning);
+        OpenImageFolderCommand = new RelayCommand(OpenImageFolder, () => !IsImportRunning);
         AddImagesCommand = new RelayCommand(AddImages, () => Images.Count > 0 && !IsImportRunning);
+        AddImageFolderCommand = new RelayCommand(AddImageFolder, () => Images.Count > 0 && !IsImportRunning);
         NewProjectCommand = new RelayCommand(NewProject, () => !IsImportRunning);
         OpenProjectCommand = new RelayCommand(OpenProject, () => !IsImportRunning);
         SaveProjectCommand = new RelayCommand(SaveProject, () => IsProjectReady && !IsImportRunning);
@@ -229,7 +241,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public RelayCommand OpenImagesCommand { get; }
 
+    public RelayCommand OpenImageFolderCommand { get; }
+
     public RelayCommand AddImagesCommand { get; }
+
+    public RelayCommand AddImageFolderCommand { get; }
 
     public RelayCommand NewProjectCommand { get; }
 
@@ -321,11 +337,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     public double InferenceBatchProgressPercent => _inferenceBatchTotalImages == 0
         ? 0
-        : 100.0 * _inferenceBatchCompletedImages / _inferenceBatchTotalImages;
+        : Math.Clamp(100.0 * _inferenceBatchCompletedImages / _inferenceBatchTotalImages, 0.0, 100.0);
 
     public string InferenceBatchProgressLabel => _inferenceBatchTotalImages == 0
         ? "Idle"
-        : $"{_inferenceBatchCompletedImages}/{_inferenceBatchTotalImages}";
+        : $"{Math.Clamp(_inferenceBatchCompletedImages, 0, _inferenceBatchTotalImages)}/{_inferenceBatchTotalImages}";
 
     public bool IsInferenceBatchRunning
     {
@@ -793,6 +809,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ProjectName,
             _projectState.ProjectKind,
             BrowseProjectImagePaths,
+            BrowseProjectImageFolderPaths,
             LoadLabelNamesFromFile,
             ConfirmProjectSetup,
             OpenExistingProjectFromSetupAsync,
@@ -1088,6 +1105,68 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async void OpenImageFolder()
+    {
+        if (IsImportRunning)
+        {
+            StatusMessage = "Image import is already running.";
+            return;
+        }
+
+        var folderPath = BrowseImageFolderPath();
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return;
+        }
+
+        var imagePaths = EnumerateImagePathsInFolder(folderPath);
+        if (imagePaths.Length == 0)
+        {
+            StatusMessage = $"No supported images found in '{folderPath}'.";
+            return;
+        }
+
+        try
+        {
+            var importResult = await LoadImageRecordsAsync(imagePaths, "Importing image folder");
+            if (importResult.Images.Length == 0)
+            {
+                StatusMessage = importResult.FailedCount > 0
+                    ? $"Unable to import {importResult.FailedCount} image(s) from the selected folder."
+                    : "No images were imported from the selected folder.";
+                return;
+            }
+
+            ImportProgressMessage = "Registering images in native engine...";
+            _projectFilePath = null;
+            ReplaceState(new ProjectState
+            {
+                Name = "makesense-native",
+                ProjectKind = ProjectKind.ObjectDetection,
+                ProjectPath = folderPath,
+                PerformanceConfig = Performance.ToModel(),
+                Images = importResult.Images,
+                Labels = _projectState.Labels
+            });
+
+            ResetInferenceBatchState();
+            ProjectPath = folderPath;
+            await Task.Run(() => EngineSession.OpenImages(importResult.Images.Select(image => image.Path)));
+            SelectedImage = Images.FirstOrDefault();
+            StatusMessage = importResult.FailedCount == 0
+                ? $"{Images.Count} images loaded from folder."
+                : $"{Images.Count} images loaded from folder. {importResult.FailedCount} unreadable image(s) were skipped.";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+        }
+        finally
+        {
+            EndImageImport();
+        }
+    }
+
     private async void AddImages()
     {
         if (IsImportRunning)
@@ -1153,6 +1232,66 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private async void AddImageFolder()
+    {
+        if (IsImportRunning)
+        {
+            StatusMessage = "Image import is already running.";
+            return;
+        }
+
+        var folderPath = BrowseImageFolderPath();
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return;
+        }
+
+        var knownPaths = _projectState.Images
+            .Select(image => image.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var newImagePaths = EnumerateImagePathsInFolder(folderPath)
+            .Where(path => !knownPaths.Contains(path))
+            .ToArray();
+
+        if (newImagePaths.Length == 0)
+        {
+            StatusMessage = "No new images were found in the selected folder.";
+            return;
+        }
+
+        try
+        {
+            var importResult = await LoadImageRecordsAsync(newImagePaths, "Adding image folder");
+            if (importResult.Images.Length == 0)
+            {
+                StatusMessage = importResult.FailedCount > 0
+                    ? $"Unable to add {importResult.FailedCount} image(s) from the selected folder."
+                    : "No new images were added from the selected folder.";
+                return;
+            }
+
+            var appendedImages = _projectState.Images
+                .Concat(importResult.Images)
+                .ToArray();
+
+            ImportProgressMessage = "Registering images in native engine...";
+            ReplaceState(_projectState.ReplaceImages(appendedImages));
+            ResetInferenceBatchState();
+            await Task.Run(() => EngineSession.OpenImages(appendedImages.Select(image => image.Path)));
+            StatusMessage = importResult.FailedCount == 0
+                ? $"{importResult.Images.Length} image(s) added from folder."
+                : $"{importResult.Images.Length} image(s) added from folder. {importResult.FailedCount} unreadable image(s) were skipped.";
+        }
+        catch (Exception exception)
+        {
+            StatusMessage = exception.Message;
+        }
+        finally
+        {
+            EndImageImport();
+        }
+    }
+
     private sealed record ImageImportResult(ImageRecord[] Images, int FailedCount);
 
     private async Task<ImageImportResult> LoadImageRecordsAsync(IReadOnlyList<string> imagePaths, string operationName)
@@ -1174,7 +1313,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 var path = imagePaths[index];
                 try
                 {
-                    records.Add(_imageMetadataService.CreateRecord(path));
+                    records.Add(_imageMetadataService.CreateRecord(path, readPixelSize: false));
                 }
                 catch
                 {
@@ -1206,6 +1345,42 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         return dialog.ShowDialog() == true ? dialog.FileNames : null;
     }
 
+    private static string[]? BrowseProjectImageFolderPaths()
+    {
+        var folderPath = BrowseImageFolderPath();
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return null;
+        }
+
+        var imagePaths = EnumerateImagePathsInFolder(folderPath);
+        return imagePaths.Length == 0 ? null : imagePaths;
+    }
+
+    private static string? BrowseImageFolderPath()
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Choose an image folder"
+        };
+
+        return dialog.ShowDialog() == true ? dialog.FolderName : null;
+    }
+
+    private static string[] EnumerateImagePathsInFolder(string folderPath)
+    {
+        if (!Directory.Exists(folderPath))
+        {
+            return [];
+        }
+
+        var supportedExtensions = SupportedImageExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return Directory.EnumerateFiles(folderPath)
+            .Where(path => supportedExtensions.Contains(Path.GetExtension(path)))
+            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private async Task<bool> ConfirmProjectSetup(ProjectSetupDialogViewModel dialog)
     {
         var labelNames = dialog.ParsedLabelsPreview;
@@ -1218,13 +1393,6 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         if (dialog.ImagePaths.Count == 0)
         {
             StatusMessage = "Select at least one image before starting the project.";
-            return false;
-        }
-
-        var projectFilePath = BrowseProjectSavePath(dialog.ProjectName.Trim());
-        if (string.IsNullOrWhiteSpace(projectFilePath))
-        {
-            StatusMessage = "Project creation canceled because no project file was selected.";
             return false;
         }
 
@@ -1252,7 +1420,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 Name = dialog.ProjectName.Trim(),
                 ProjectKind = dialog.SelectedProjectKind,
-                ProjectPath = projectFilePath,
+                ProjectPath = "Unsaved project",
                 PerformanceConfig = Performance.ToModel(),
                 Images = importResult.Images,
                 Labels = labels
@@ -1262,20 +1430,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 ? AnnotationTool.ImageRecognition
                 : AnnotationTool.Rect;
             ResetInferenceBatchState();
-            _projectFilePath = projectFilePath;
-            ProjectPath = projectFilePath;
-            EngineSession.OpenProject(projectFilePath);
+            _projectFilePath = null;
+            ProjectPath = "Unsaved project";
             await Task.Run(() => EngineSession.OpenImages(importResult.Images.Select(image => image.Path)));
             SelectedImage = Images.FirstOrDefault();
             SelectedLabel = Labels.FirstOrDefault();
-            if (!await SaveProjectToPathAsync(projectFilePath, publishStatus: false))
-            {
-                return false;
-            }
+            SaveProjectCommand.RaiseCanExecuteChanged();
+            SaveProjectAsCommand.RaiseCanExecuteChanged();
 
             StatusMessage = importResult.FailedCount == 0
-                ? $"Project '{ProjectName}' created and saved with {Images.Count} image(s) and {Labels.Count} label(s)."
-                : $"Project '{ProjectName}' created and saved. {importResult.FailedCount} unreadable image(s) were skipped.";
+                ? $"Project '{ProjectName}' created with {Images.Count} image(s) and {Labels.Count} label(s). Save the project when ready."
+                : $"Project '{ProjectName}' created. {importResult.FailedCount} unreadable image(s) were skipped. Save the project when ready.";
             return true;
         }
         catch (Exception exception)
@@ -1959,7 +2124,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void RunActiveModelInference()
     {
-        TryStartInferenceBatch(ActiveModelPath, SelectedInferenceTask);
+        TryStartInferenceForActiveImage(ActiveModelPath, SelectedInferenceTask);
     }
 
     private bool CanRunActiveModelInference()
@@ -1968,6 +2133,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             !IsInferenceBatchRunning &&
             _projectState.Images.Count > 0 &&
             _projectState.Labels.Count > 0 &&
+            SelectedImage is not null &&
             SelectedLabel is not null &&
             !string.IsNullOrWhiteSpace(ActiveModelPath);
     }
@@ -1978,6 +2144,51 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             !IsInferenceBatchRunning &&
             _projectState.Images.Count > 0 &&
             _projectState.Labels.Count > 0;
+    }
+
+    private bool TryStartInferenceForActiveImage(string modelPath, string taskName)
+    {
+        if (IsInferenceBatchRunning)
+        {
+            StatusMessage = "Inference is already running.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
+        {
+            StatusMessage = "Select a valid ONNX model file before running inference.";
+            return false;
+        }
+
+        var activeImage = SelectedImage;
+        if (activeImage is null)
+        {
+            StatusMessage = "Select an image before running inference.";
+            return false;
+        }
+
+        var inferenceLabel = SelectedLabel ?? Labels.FirstOrDefault();
+        if (inferenceLabel is null)
+        {
+            StatusMessage = "Select or create a label before running inference.";
+            return false;
+        }
+
+        SelectedLabel = inferenceLabel;
+        ActiveModelPath = modelPath;
+        SelectedInferenceTask = taskName;
+        ResetInferenceBatchState(1);
+        _inferenceBatchCompletedImages = 0;
+        IsInferenceBatchRunning = true;
+        ActiveInferenceBackend = "Running";
+        ActiveInferenceProvider = "Pending";
+        ActiveInferenceRuntime = $"Running {taskName} on {activeImage.FileName} using label '{inferenceLabel.Name}'.";
+        StatusMessage = ActiveInferenceRuntime;
+        RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+        RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+
+        _ = RunInferenceForActiveImageAsync(modelPath, taskName, activeImage.Path, inferenceLabel.Id);
+        return true;
     }
 
     private bool TryStartInferenceBatch(string modelPath, string taskName)
@@ -2351,6 +2562,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
     private void ApplySelectedImage(ImageRecord? value, bool updateProjectState, bool updateNativeEngine)
     {
+        value = EnsurePixelSizeLoaded(value);
         var previousImage = _selectedImage;
         if (!SetProperty(ref _selectedImage, value, nameof(SelectedImage)))
         {
@@ -2391,6 +2603,50 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 EngineSession.SetActiveImage(nextPath);
                 UpdateViewportTransform(1.0, 0.0, 0.0);
             }
+        }
+    }
+
+    private ImageRecord? EnsurePixelSizeLoaded(ImageRecord? image)
+    {
+        if (image?.PixelSize is not null)
+        {
+            return image;
+        }
+
+        if (image is null || !File.Exists(image.Path))
+        {
+            return image;
+        }
+
+        try
+        {
+            var updatedImage = image with { PixelSize = _imageMetadataService.ReadPixelSize(image.Path) };
+            ReplaceImageRecord(updatedImage);
+            return updatedImage;
+        }
+        catch
+        {
+            return image;
+        }
+    }
+
+    private void ReplaceImageRecord(ImageRecord updatedImage)
+    {
+        var projectImages = _projectState.Images.ToArray();
+        var projectIndex = Array.FindIndex(projectImages, image => image.Id == updatedImage.Id);
+        if (projectIndex >= 0)
+        {
+            projectImages[projectIndex] = updatedImage;
+            _projectState = _projectState.ReplaceImages(projectImages);
+        }
+
+        var collectionIndex = Images
+            .Select((image, index) => new { image, index })
+            .FirstOrDefault(item => item.image.Id == updatedImage.Id)
+            ?.index;
+        if (collectionIndex is int index)
+        {
+            Images[index] = updatedImage;
         }
     }
 
@@ -2456,7 +2712,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var selectedIndex = SelectedImage is null
             ? -1
             : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
-        var targetIndex = Math.Clamp(selectedIndex + offset, 0, visibleImages.Length - 1);
+        var targetIndex = selectedIndex < 0
+            ? (offset < 0 ? visibleImages.Length - 1 : 0)
+            : WrapIndex(selectedIndex + offset, visibleImages.Length);
         SelectedImage = visibleImages[targetIndex];
         StatusMessage = $"Active image: {SelectedImage.FileName} ({targetIndex + 1}/{visibleImages.Length} filtered).";
     }
@@ -2484,21 +2742,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool CanSelectPreviousImage()
     {
         var visibleImages = GetVisibleImages();
-        return SelectedImage is not null && Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id) > 0;
+        return SelectedImage is not null && visibleImages.Length > 1;
     }
 
     private bool CanSelectNextImage()
     {
         var visibleImages = GetVisibleImages();
-        var selectedIndex = SelectedImage is null
-            ? -1
-            : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
-        return selectedIndex >= 0 && selectedIndex < visibleImages.Length - 1;
+        return SelectedImage is not null && visibleImages.Length > 1;
     }
 
     private ImageRecord[] GetVisibleImages()
     {
         return FilteredImagesView.Cast<ImageRecord>().ToArray();
+    }
+
+    private static int WrapIndex(int index, int count)
+    {
+        return ((index % count) + count) % count;
     }
 
     private void LoadSelectedAnnotationEditor()
@@ -2534,13 +2794,32 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             var imagePaths = images.Select(image => image.Path).ToArray();
+            var appliedResultImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var results = await Task.Run(() =>
-                EngineSession.RunInferenceBatch(modelPath, taskName, imagePaths, (completedImages, totalImages) =>
+                EngineSession.RunInferenceBatch(modelPath, taskName, imagePaths, (completedImages, totalImages, completedResults) =>
                 {
                     _ = _uiDispatcher.BeginInvoke(() =>
                     {
                         _inferenceBatchCompletedImages = completedImages;
                         _inferenceBatchTotalImages = totalImages;
+                        if (completedResults.Count > 0)
+                        {
+                            var inferenceLabel = Labels.FirstOrDefault(label => label.Id == labelId);
+                            if (inferenceLabel is not null)
+                            {
+                                var incrementalSummary = ApplyNativeInferenceBatchResults(modelPath, taskName, completedResults, inferenceLabel);
+                                foreach (var result in completedResults)
+                                {
+                                    appliedResultImagePaths.Add(result.Summary.ActiveImagePath);
+                                }
+
+                                if (incrementalSummary.SuggestionCount > 0)
+                                {
+                                    ActiveInferenceRuntime = $"Inference running. {SuggestionImageCount} image(s) with suggestion(s), {completedImages}/{totalImages} processed.";
+                                }
+                            }
+                        }
+
                         RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
                         RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
                     });
@@ -2555,17 +2834,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     return;
                 }
 
-                var batchSummary = ApplyNativeInferenceBatchResults(modelPath, taskName, results, inferenceLabel);
+                var unappliedResults = results
+                    .Where(result => !appliedResultImagePaths.Contains(result.Summary.ActiveImagePath))
+                    .ToArray();
+                if (results.Count == 0)
+                {
+                    _inferenceBatchCompletedImages = 0;
+                    _inferenceBatchTotalImages = images.Count;
+                    RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                    RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+
+                    var latestSummary = EngineSession.ReadLatestInferenceSummary();
+                    UpdateInferenceRuntime(latestSummary);
+                    ActiveInferenceBackend = string.IsNullOrWhiteSpace(ActiveInferenceBackend) ? "Unavailable" : ActiveInferenceBackend;
+                    ActiveInferenceRuntime = string.IsNullOrWhiteSpace(latestSummary?.StatusMessage)
+                        ? $"Inference returned no native result for '{inferenceLabel.Name}'."
+                        : latestSummary.StatusMessage;
+                    StatusMessage = ActiveInferenceRuntime;
+                    return;
+                }
+
+                var batchSummary = ApplyNativeInferenceBatchResults(modelPath, taskName, unappliedResults, inferenceLabel);
+                var totalSuggestionCount = results
+                    .Where(result => result.Summary.ResultCode == MsInferenceResultCode.Ok)
+                    .Sum(result => result.Suggestions.Count);
+                var totalUpdatedImageCount = results
+                    .Count(result => result.Summary.ResultCode == MsInferenceResultCode.Ok && result.Suggestions.Count > 0);
+                var totalFailedImageCount = results
+                    .Count(result => result.Summary.ResultCode != MsInferenceResultCode.Ok);
 
                 _inferenceBatchCompletedImages = images.Count;
                 _inferenceBatchTotalImages = images.Count;
                 RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
                 RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
 
-                UpdateInferenceBackendIdentity(batchSummary.LatestSummary);
-                ActiveInferenceRuntime = batchSummary.FailedImages == 0
-                    ? $"Batch inference completed. {batchSummary.UpdatedImages} image(s), {batchSummary.SuggestionCount} suggestion(s) for '{inferenceLabel.Name}'."
-                    : $"Batch inference completed with {batchSummary.FailedImages} failed image(s). {batchSummary.UpdatedImages} image(s), {batchSummary.SuggestionCount} suggestion(s) for '{inferenceLabel.Name}'.";
+                UpdateInferenceBackendIdentity(results.LastOrDefault()?.Summary ?? batchSummary.LatestSummary);
+                ActiveInferenceRuntime = totalFailedImageCount == 0
+                    ? $"Batch inference completed. {totalUpdatedImageCount} image(s), {totalSuggestionCount} suggestion(s) for '{inferenceLabel.Name}'."
+                    : $"Batch inference completed with {totalFailedImageCount} failed image(s). {totalUpdatedImageCount} image(s), {totalSuggestionCount} suggestion(s) for '{inferenceLabel.Name}'.";
                 StatusMessage = ActiveInferenceRuntime;
             });
         }
@@ -2593,23 +2899,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             .GroupBy(result => result.Summary.ActiveImagePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
 
-        var updatedImages = new List<ImageRecord>(_projectState.Images.Count);
+        if (resultsByImagePath.Count == 0)
+        {
+            return new InferenceBatchApplySummary(0, 0, 0, results.LastOrDefault()?.Summary);
+        }
+
+        var projectImages = _projectState.Images.ToArray();
+        var projectIndexByPath = projectImages
+            .Select((image, index) => new { image.Path, index })
+            .ToDictionary(item => item.Path, item => item.index, StringComparer.OrdinalIgnoreCase);
+        var collectionIndexById = Images
+            .Select((image, index) => new { image.Id, index })
+            .ToDictionary(item => item.Id, item => item.index, StringComparer.Ordinal);
+        var selectedImageUpdated = false;
         var changed = false;
         var updatedImageCount = 0;
         var suggestionCount = 0;
         var failedImageCount = resultsByImagePath.Values.Count(result => result.Summary.ResultCode != MsInferenceResultCode.Ok);
         NativeInferenceResultSummary? latestSummary = results.LastOrDefault()?.Summary;
 
-        foreach (var image in _projectState.Images)
+        foreach (var result in resultsByImagePath.Values)
         {
-            if (!resultsByImagePath.TryGetValue(image.Path, out var result) ||
-                result.Summary.ResultCode != MsInferenceResultCode.Ok ||
+            if (result.Summary.ResultCode != MsInferenceResultCode.Ok ||
                 result.Suggestions.Count == 0)
             {
-                updatedImages.Add(image);
                 continue;
             }
 
+            if (!projectIndexByPath.TryGetValue(result.Summary.ActiveImagePath, out var projectIndex))
+            {
+                continue;
+            }
+
+            var image = projectImages[projectIndex];
             var convertedSuggestions = result.Suggestions
                 .Select(suggestion => ConvertNativeSuggestion(suggestion, inferenceLabel))
                 .ToArray();
@@ -2621,7 +2943,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                     .ToArray()
             };
 
-            updatedImages.Add(updatedImage);
+            projectImages[projectIndex] = updatedImage;
+            if (collectionIndexById.TryGetValue(updatedImage.Id, out var collectionIndex))
+            {
+                Images[collectionIndex] = updatedImage;
+            }
+
+            selectedImageUpdated |= SelectedImage?.Id == updatedImage.Id;
             updatedImageCount++;
             suggestionCount += convertedSuggestions.Length;
             changed = true;
@@ -2629,10 +2957,53 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (changed)
         {
-            ReplaceState(_projectState.ReplaceImages(updatedImages));
+            _projectState = _projectState.ReplaceImages(projectImages);
+            if (selectedImageUpdated)
+            {
+                ApplySelectedImage(ResolveImage(SelectedImage?.Id), updateProjectState: false, updateNativeEngine: false);
+                RefreshAnnotationCollection();
+            }
+
+            RaisePropertyChanged(nameof(CurrentAnnotations));
+            RaisePropertyChanged(nameof(SuggestedAnnotationCount));
+            RaisePropertyChanged(nameof(FilteredImageCount));
+            RaisePropertyChanged(nameof(SuggestionImageCount));
+            RaisePropertyChanged(nameof(PendingReviewImageCount));
+            RaisePropertyChanged(nameof(ProjectProgressPercent));
+            RefreshImageBrowser();
+            NextPendingReviewImageCommand.RaiseCanExecuteChanged();
+            NextSuggestionImageCommand.RaiseCanExecuteChanged();
+            AcceptAllSuggestionsCommand.RaiseCanExecuteChanged();
+            RejectAllSuggestionsCommand.RaiseCanExecuteChanged();
+            AcceptAllDatasetSuggestionsCommand.RaiseCanExecuteChanged();
+            RejectAllDatasetSuggestionsCommand.RaiseCanExecuteChanged();
         }
 
         return new InferenceBatchApplySummary(updatedImageCount, suggestionCount, failedImageCount, latestSummary);
+    }
+
+    private async Task RunInferenceForActiveImageAsync(string modelPath, string taskName, string imagePath, string labelId)
+    {
+        try
+        {
+            await RunInferenceForImageAsync(modelPath, taskName, imagePath, labelId);
+            await _uiDispatcher.InvokeAsync(() =>
+            {
+                _inferenceBatchCompletedImages = 1;
+                _inferenceBatchTotalImages = 1;
+                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+            });
+        }
+        finally
+        {
+            await _uiDispatcher.InvokeAsync(() =>
+            {
+                IsInferenceBatchRunning = false;
+                RaisePropertyChanged(nameof(InferenceBatchProgressPercent));
+                RaisePropertyChanged(nameof(InferenceBatchProgressLabel));
+            });
+        }
     }
 
     private async Task RunInferenceForImageAsync(string modelPath, string taskName, string imagePath, string labelId)
@@ -2825,7 +3196,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private void RaiseImportCommandCanExecuteChanged()
     {
         OpenImagesCommand.RaiseCanExecuteChanged();
+        OpenImageFolderCommand.RaiseCanExecuteChanged();
         AddImagesCommand.RaiseCanExecuteChanged();
+        AddImageFolderCommand.RaiseCanExecuteChanged();
         NewProjectCommand.RaiseCanExecuteChanged();
         OpenProjectCommand.RaiseCanExecuteChanged();
         SaveProjectCommand.RaiseCanExecuteChanged();

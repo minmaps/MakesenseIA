@@ -408,6 +408,96 @@ public sealed class PerformanceAndSerializationTests
     }
 
     [Fact]
+    public void MainWindowViewModel_PreviousAndNextWrapInsideFilteredImages()
+    {
+        var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(settingsDirectory, "settings.json");
+        Directory.CreateDirectory(settingsDirectory);
+
+        try
+        {
+            var performanceService = new PerformanceConfigService(new HardwareInfoService(), settingsPath);
+            using var session = new NativeEngineSession();
+            using var viewModel = new MainWindowViewModel(performanceService, session, new PerformanceConfig
+            {
+                MaxRamMb = 1024,
+                MaxVramMb = 1024,
+                MaxDecodeThreads = 2,
+                MaxIoThreads = 2,
+                MaxInferenceJobs = 1,
+                MaxPrefetchImages = 8
+            });
+            var replaceState = typeof(MainWindowViewModel).GetMethod("ReplaceState", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(replaceState);
+
+            replaceState!.Invoke(viewModel, [new ProjectState
+            {
+                Name = "sample",
+                ProjectKind = ProjectKind.ObjectDetection,
+                PerformanceConfig = new PerformanceConfig
+                {
+                    MaxRamMb = 1024,
+                    MaxVramMb = 1024,
+                    MaxDecodeThreads = 2,
+                    MaxIoThreads = 2,
+                    MaxInferenceJobs = 1,
+                    MaxPrefetchImages = 8
+                },
+                Images =
+                [
+                    CreateImage("img-1", "a.png", hasSuggestion: true),
+                    CreateImage("img-2", "b.png", hasSuggestion: false),
+                    CreateImage("img-3", "c.png", hasSuggestion: true)
+                ]
+            }]);
+
+            viewModel.SelectedImageFilter = ImageFilterMode.WithSuggestions;
+
+            Assert.Equal("img-1", viewModel.SelectedImage?.Id);
+            Assert.True(viewModel.PreviousImageCommand.CanExecute(null));
+            Assert.True(viewModel.NextImageCommand.CanExecute(null));
+
+            viewModel.SelectPreviousImage();
+            Assert.Equal("img-3", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectNextImage();
+            Assert.Equal("img-1", viewModel.SelectedImage?.Id);
+        }
+        finally
+        {
+            if (Directory.Exists(settingsDirectory))
+            {
+                Directory.Delete(settingsDirectory, true);
+            }
+        }
+
+        static ImageRecord CreateImage(string id, string fileName, bool hasSuggestion)
+        {
+            return new ImageRecord
+            {
+                Id = id,
+                Path = $@"C:\images\{fileName}",
+                FileName = fileName,
+                FileSizeBytes = 1234,
+                PixelSize = new Size2D(800, 600),
+                Annotations = hasSuggestion
+                    ?
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = $"ann-{id}",
+                            Kind = AnnotationKind.Rect,
+                            SuggestedLabel = "Enemy",
+                            SuggestedConfidence = 0.8,
+                            Rect = new RectD(0, 0, 10, 10)
+                        }
+                    ]
+                    : []
+            };
+        }
+    }
+
+    [Fact]
     public void MainWindowViewModel_ConvertedNativeSuggestionsKeepAssignedLabelAndSuggestionState()
     {
         var convertMethod = typeof(MainWindowViewModel).GetMethod("ConvertNativeSuggestion", BindingFlags.Static | BindingFlags.NonPublic);

@@ -83,7 +83,9 @@
                 <MenuItem Header="Save _As..." Command="{Binding SaveProjectAsCommand}" InputGestureText="Ctrl+Shift+S" />
                 <Separator />
                 <MenuItem Header="Open _Images..." Command="{Binding OpenImagesCommand}" />
+                <MenuItem Header="Open Image _Folder..." Command="{Binding OpenImageFolderCommand}" />
                 <MenuItem Header="_Add Images..." Command="{Binding AddImagesCommand}" />
+                <MenuItem Header="Add Image F_older..." Command="{Binding AddImageFolderCommand}" />
                 <Separator />
                 <MenuItem Header="_Import Annotations..." Command="{Binding ImportAnnotationsCommand}" />
                 <MenuItem Header="_Export Annotations..." Command="{Binding ExportAnnotationsCommand}" />
@@ -118,7 +120,9 @@
                 </StackPanel>
                 <WrapPanel VerticalAlignment="Center" Margin="24,0,0,0">
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open" Command="{Binding OpenImagesCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open Folder" Command="{Binding OpenImageFolderCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Add" Command="{Binding AddImagesCommand}" />
+                    <Button Style="{StaticResource ToolbarButtonStyle}" Content="Add Folder" Command="{Binding AddImageFolderCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Open Project" Command="{Binding OpenProjectCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Import" Command="{Binding ImportAnnotationsCommand}" />
                     <Button Style="{StaticResource ToolbarButtonStyle}" Content="Export" Command="{Binding ExportAnnotationsCommand}" />
@@ -458,7 +462,7 @@
                                     </Border>
                                     <Border Style="{StaticResource MetricCardStyle}" Margin="8,0,0,8">
                                         <StackPanel>
-                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="VRAM process" />
+                                            <TextBlock Style="{StaticResource CaptionTextStyle}" Text="VRAM utilisée" />
                                             <TextBlock FontSize="21" FontWeight="Bold" Text="{Binding PerformanceMonitor.VramUsedMb, Mode=OneWay, StringFormat={}{0:0} MB}" />
                                         </StackPanel>
                                     </Border>
@@ -489,7 +493,7 @@
                                         <TextBox Text="{Binding Performance.MaxInferenceJobs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Max VRAM (MB)" />
+                                        <TextBlock Style="{StaticResource CaptionTextStyle}" Text="Budget VRAM (MB)" />
                                         <TextBox Text="{Binding Performance.MaxVramMb, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                                         <TextBlock Style="{StaticResource CaptionTextStyle}" Text="I/O threads" />
                                         <TextBox Text="{Binding Performance.MaxIoThreads, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />

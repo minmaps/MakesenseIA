@@ -6,6 +6,7 @@ namespace Makesense.Desktop.ViewModels.Dialogs;
 public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
 {
     private readonly Func<string[]?> _browseImages;
+    private readonly Func<string[]?> _browseImageFolder;
     private readonly Func<string[]?> _loadLabelsFromFile;
     private readonly Func<ProjectSetupDialogViewModel, Task<bool>> _confirmAction;
     private readonly Func<Task<bool>> _openExistingProjectAction;
@@ -19,6 +20,7 @@ public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
         string projectName,
         ProjectKind selectedProjectKind,
         Func<string[]?> browseImages,
+        Func<string[]?> browseImageFolder,
         Func<string[]?> loadLabelsFromFile,
         Func<ProjectSetupDialogViewModel, Task<bool>> confirmAction,
         Func<Task<bool>> openExistingProjectAction,
@@ -35,10 +37,12 @@ public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
         _imagePaths = Array.Empty<string>();
         _labelNamesText = string.Empty;
         _browseImages = browseImages;
+        _browseImageFolder = browseImageFolder;
         _loadLabelsFromFile = loadLabelsFromFile;
         _confirmAction = confirmAction;
         _openExistingProjectAction = openExistingProjectAction;
         BrowseImagesCommand = new RelayCommand(BrowseImages, () => !IsBusy);
+        BrowseImageFolderCommand = new RelayCommand(BrowseImageFolder, () => !IsBusy);
         LoadLabelsFromFileCommand = new RelayCommand(LoadLabelsFromFile, () => !IsBusy);
         ConfirmCommand = new RelayCommand(Confirm, CanConfirm);
         OpenExistingProjectCommand = new RelayCommand(OpenExistingProject, () => !IsBusy);
@@ -47,6 +51,8 @@ public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
     public IReadOnlyList<ProjectKind> AvailableProjectKinds { get; } = Enum.GetValues<ProjectKind>();
 
     public RelayCommand BrowseImagesCommand { get; }
+
+    public RelayCommand BrowseImageFolderCommand { get; }
 
     public RelayCommand LoadLabelsFromFileCommand { get; }
 
@@ -117,6 +123,7 @@ public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
             if (SetProperty(ref _isBusy, value))
             {
                 BrowseImagesCommand.RaiseCanExecuteChanged();
+                BrowseImageFolderCommand.RaiseCanExecuteChanged();
                 LoadLabelsFromFileCommand.RaiseCanExecuteChanged();
                 ConfirmCommand.RaiseCanExecuteChanged();
                 OpenExistingProjectCommand.RaiseCanExecuteChanged();
@@ -127,6 +134,17 @@ public sealed class ProjectSetupDialogViewModel : ModalDialogViewModel
     private void BrowseImages()
     {
         var paths = _browseImages();
+        if (paths is null || paths.Length == 0)
+        {
+            return;
+        }
+
+        ImagePaths = paths;
+    }
+
+    private void BrowseImageFolder()
+    {
+        var paths = _browseImageFolder();
         if (paths is null || paths.Length == 0)
         {
             return;
