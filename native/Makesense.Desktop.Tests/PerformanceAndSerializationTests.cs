@@ -408,6 +408,94 @@ public sealed class PerformanceAndSerializationTests
     }
 
     [Fact]
+    public void MainWindowViewModel_FilterChangeSelectsNearestImageInsteadOfFirst()
+    {
+        var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(settingsDirectory, "settings.json");
+        Directory.CreateDirectory(settingsDirectory);
+
+        try
+        {
+            var performanceService = new PerformanceConfigService(new HardwareInfoService(), settingsPath);
+            using var session = new NativeEngineSession();
+            using var viewModel = new MainWindowViewModel(performanceService, session, new PerformanceConfig
+            {
+                MaxRamMb = 1024,
+                MaxVramMb = 1024,
+                MaxDecodeThreads = 2,
+                MaxIoThreads = 2,
+                MaxInferenceJobs = 1,
+                MaxPrefetchImages = 8
+            });
+            var replaceState = typeof(MainWindowViewModel).GetMethod("ReplaceState", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(replaceState);
+
+            replaceState!.Invoke(viewModel, [new ProjectState
+            {
+                Name = "sample",
+                ProjectKind = ProjectKind.ObjectDetection,
+                ActiveImageId = "img-5",
+                PerformanceConfig = new PerformanceConfig
+                {
+                    MaxRamMb = 1024,
+                    MaxVramMb = 1024,
+                    MaxDecodeThreads = 2,
+                    MaxIoThreads = 2,
+                    MaxInferenceJobs = 1,
+                    MaxPrefetchImages = 8
+                },
+                Images =
+                [
+                    CreateImage("img-1", "a.png", hasSuggestion: true),
+                    CreateImage("img-2", "b.png", hasSuggestion: false),
+                    CreateImage("img-3", "c.png", hasSuggestion: true),
+                    CreateImage("img-4", "d.png", hasSuggestion: false),
+                    CreateImage("img-5", "e.png", hasSuggestion: false),
+                    CreateImage("img-6", "f.png", hasSuggestion: true)
+                ]
+            }]);
+
+            Assert.Equal("img-5", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectedImageFilter = ImageFilterMode.WithSuggestions;
+
+            Assert.Equal("img-6", viewModel.SelectedImage?.Id);
+        }
+        finally
+        {
+            if (Directory.Exists(settingsDirectory))
+            {
+                Directory.Delete(settingsDirectory, true);
+            }
+        }
+
+        static ImageRecord CreateImage(string id, string fileName, bool hasSuggestion)
+        {
+            return new ImageRecord
+            {
+                Id = id,
+                Path = $@"C:\images\{fileName}",
+                FileName = fileName,
+                FileSizeBytes = 1234,
+                PixelSize = new Size2D(800, 600),
+                Annotations = hasSuggestion
+                    ?
+                    [
+                        new AnnotationRecord
+                        {
+                            Id = $"ann-{id}",
+                            Kind = AnnotationKind.Rect,
+                            SuggestedLabel = "Enemy",
+                            SuggestedConfidence = 0.8,
+                            Rect = new RectD(0, 0, 10, 10)
+                        }
+                    ]
+                    : []
+            };
+        }
+    }
+
+    [Fact]
     public void MainWindowViewModel_PreviousAndNextWrapInsideFilteredImages()
     {
         var settingsDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -447,7 +535,10 @@ public sealed class PerformanceAndSerializationTests
                 [
                     CreateImage("img-1", "a.png", hasSuggestion: true),
                     CreateImage("img-2", "b.png", hasSuggestion: false),
-                    CreateImage("img-3", "c.png", hasSuggestion: true)
+                    CreateImage("img-3", "c.png", hasSuggestion: true),
+                    CreateImage("img-4", "d.png", hasSuggestion: true),
+                    CreateImage("img-5", "e.png", hasSuggestion: true),
+                    CreateImage("img-6", "f.png", hasSuggestion: true)
                 ]
             }]);
 
@@ -458,9 +549,29 @@ public sealed class PerformanceAndSerializationTests
             Assert.True(viewModel.NextImageCommand.CanExecute(null));
 
             viewModel.SelectPreviousImage();
-            Assert.Equal("img-3", viewModel.SelectedImage?.Id);
+            Assert.Equal("img-6", viewModel.SelectedImage?.Id);
 
             viewModel.SelectNextImage();
+            Assert.Equal("img-1", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectNextImage();
+            viewModel.SelectNextImage();
+            viewModel.SelectNextImage();
+            viewModel.SelectNextImage();
+            Assert.Equal("img-6", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectPreviousImage();
+            Assert.Equal("img-5", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectedImage = viewModel.Images.First(image => image.Id == "img-2");
+            Assert.True(viewModel.NextImageCommand.CanExecute(null));
+            Assert.True(viewModel.PreviousImageCommand.CanExecute(null));
+
+            viewModel.SelectNextImage();
+            Assert.Equal("img-3", viewModel.SelectedImage?.Id);
+
+            viewModel.SelectedImage = viewModel.Images.First(image => image.Id == "img-2");
+            viewModel.SelectPreviousImage();
             Assert.Equal("img-1", viewModel.SelectedImage?.Id);
         }
         finally

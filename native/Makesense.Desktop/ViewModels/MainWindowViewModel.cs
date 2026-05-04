@@ -2493,8 +2493,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         var visibleImages = FilteredImagesView.Cast<ImageRecord>().ToArray();
         if ((SelectedImage is null || !visibleImages.Any(image => image.Id == SelectedImage.Id)) && visibleImages.Length > 0)
         {
+            var targetIndex = SelectedImage is null
+                ? 0
+                : FindClosestVisibleImageIndex(visibleImages, SelectedImage.Id);
             ApplySelectedImage(
-                visibleImages.FirstOrDefault(),
+                visibleImages[targetIndex],
                 updateProjectState: true,
                 updateNativeEngine: true);
         }
@@ -2713,7 +2716,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? -1
             : Array.FindIndex(visibleImages, image => image.Id == SelectedImage.Id);
         var targetIndex = selectedIndex < 0
-            ? (offset < 0 ? visibleImages.Length - 1 : 0)
+            ? FindNearestVisibleImageIndex(visibleImages, SelectedImage?.Id, offset)
             : WrapIndex(selectedIndex + offset, visibleImages.Length);
         SelectedImage = visibleImages[targetIndex];
         StatusMessage = $"Active image: {SelectedImage.FileName} ({targetIndex + 1}/{visibleImages.Length} filtered).";
@@ -2742,18 +2745,134 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool CanSelectPreviousImage()
     {
         var visibleImages = GetVisibleImages();
-        return SelectedImage is not null && visibleImages.Length > 1;
+        return CanMoveWithinVisibleImages(visibleImages);
     }
 
     private bool CanSelectNextImage()
     {
         var visibleImages = GetVisibleImages();
-        return SelectedImage is not null && visibleImages.Length > 1;
+        return CanMoveWithinVisibleImages(visibleImages);
     }
 
     private ImageRecord[] GetVisibleImages()
     {
         return FilteredImagesView.Cast<ImageRecord>().ToArray();
+    }
+
+    private bool CanMoveWithinVisibleImages(IReadOnlyList<ImageRecord> visibleImages)
+    {
+        if (SelectedImage is null || visibleImages.Count == 0)
+        {
+            return false;
+        }
+
+        return visibleImages.Count > 1 || visibleImages.All(image => image.Id != SelectedImage.Id);
+    }
+
+    private int FindNearestVisibleImageIndex(IReadOnlyList<ImageRecord> visibleImages, string? anchorImageId, int offset)
+    {
+        if (string.IsNullOrWhiteSpace(anchorImageId))
+        {
+            return offset < 0 ? visibleImages.Count - 1 : 0;
+        }
+
+        var projectIndexById = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < _projectState.Images.Count; index++)
+        {
+            projectIndexById[_projectState.Images[index].Id] = index;
+        }
+
+        if (!projectIndexById.TryGetValue(anchorImageId, out var anchorProjectIndex))
+        {
+            return offset < 0 ? visibleImages.Count - 1 : 0;
+        }
+
+        var visibleProjectIndexes = new List<(int VisibleIndex, int ProjectIndex)>(visibleImages.Count);
+        for (var visibleIndex = 0; visibleIndex < visibleImages.Count; visibleIndex++)
+        {
+            if (projectIndexById.TryGetValue(visibleImages[visibleIndex].Id, out var projectIndex))
+            {
+                visibleProjectIndexes.Add((visibleIndex, projectIndex));
+            }
+        }
+
+        if (visibleProjectIndexes.Count == 0)
+        {
+            return offset < 0 ? visibleImages.Count - 1 : 0;
+        }
+
+        visibleProjectIndexes.Sort(static (left, right) => left.ProjectIndex.CompareTo(right.ProjectIndex));
+        if (offset < 0)
+        {
+            for (var index = visibleProjectIndexes.Count - 1; index >= 0; index--)
+            {
+                if (visibleProjectIndexes[index].ProjectIndex < anchorProjectIndex)
+                {
+                    return visibleProjectIndexes[index].VisibleIndex;
+                }
+            }
+
+            return visibleProjectIndexes[^1].VisibleIndex;
+        }
+
+        for (var index = 0; index < visibleProjectIndexes.Count; index++)
+        {
+            if (visibleProjectIndexes[index].ProjectIndex > anchorProjectIndex)
+            {
+                return visibleProjectIndexes[index].VisibleIndex;
+            }
+        }
+
+        return visibleProjectIndexes[0].VisibleIndex;
+    }
+
+    private int FindClosestVisibleImageIndex(IReadOnlyList<ImageRecord> visibleImages, string? anchorImageId)
+    {
+        if (string.IsNullOrWhiteSpace(anchorImageId))
+        {
+            return 0;
+        }
+
+        var projectIndexById = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < _projectState.Images.Count; index++)
+        {
+            projectIndexById[_projectState.Images[index].Id] = index;
+        }
+
+        if (!projectIndexById.TryGetValue(anchorImageId, out var anchorProjectIndex))
+        {
+            return 0;
+        }
+
+        var bestVisibleIndex = 0;
+        var bestProjectIndex = 0;
+        var bestDistance = int.MaxValue;
+        var bestIsBeforeAnchor = true;
+        var foundCandidate = false;
+
+        for (var visibleIndex = 0; visibleIndex < visibleImages.Count; visibleIndex++)
+        {
+            if (!projectIndexById.TryGetValue(visibleImages[visibleIndex].Id, out var projectIndex))
+            {
+                continue;
+            }
+
+            var distance = Math.Abs(projectIndex - anchorProjectIndex);
+            var isBeforeAnchor = projectIndex < anchorProjectIndex;
+            if (!foundCandidate ||
+                distance < bestDistance ||
+                (distance == bestDistance && bestIsBeforeAnchor && !isBeforeAnchor) ||
+                (distance == bestDistance && bestIsBeforeAnchor == isBeforeAnchor && projectIndex < bestProjectIndex))
+            {
+                bestVisibleIndex = visibleIndex;
+                bestProjectIndex = projectIndex;
+                bestDistance = distance;
+                bestIsBeforeAnchor = isBeforeAnchor;
+                foundCandidate = true;
+            }
+        }
+
+        return bestVisibleIndex;
     }
 
     private static int WrapIndex(int index, int count)

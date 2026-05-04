@@ -287,11 +287,6 @@ public partial class MainWindow : Window
                     e.Handled = true;
                     return;
                 case System.Windows.Input.Key.Right:
-                    if (viewModel.AcceptAllSuggestionsCommand.CanExecute(null))
-                    {
-                        viewModel.AcceptAllSuggestionsCommand.Execute(null);
-                    }
-
                     viewModel.SelectNextImage();
                     e.Handled = true;
                     return;
